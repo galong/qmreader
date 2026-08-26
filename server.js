@@ -25,6 +25,7 @@ const NEWS_REFRESH_INTERVAL_MS = parseInt(process.env.NEWS_REFRESH_INTERVAL_MS |
 const ARTICLE_REFRESH_INTERVAL_MS = parseInt(process.env.ARTICLE_REFRESH_INTERVAL_MS || `${2 * HOUR_MS}`, 10);
 const PODCAST_REFRESH_INTERVAL_MS = parseInt(process.env.PODCAST_REFRESH_INTERVAL_MS || `${6 * HOUR_MS}`, 10);
 const TITLE_TRANSLATION_LIMIT = parseInt(process.env.TITLE_TRANSLATION_LIMIT || '80', 10);
+const ALLOW_REGISTRATION = String(process.env.ALLOW_REGISTRATION || '1').trim() !== '0';
 const AUTO_REWRITE_SOURCE_IDS = new Set(String(process.env.AUTO_REWRITE_SOURCE_IDS || '')
   .split(',')
   .map(id => id.trim())
@@ -2692,7 +2693,10 @@ app.post('/api/sources/:id/refresh-hint', (req, res) => {
 });
 
 app.get('/api/me', (req, res) => {
-  res.json({ user: req.user || null });
+  res.json({
+    user: req.user || null,
+    capabilities: { registration: ALLOW_REGISTRATION },
+  });
 });
 
 app.patch('/api/me/profile', requireLogin, (req, res) => {
@@ -2737,6 +2741,9 @@ app.post('/api/me/notifications/read', requireLogin, (req, res) => {
 });
 
 app.post('/api/auth/register', registerRateLimit, (req, res) => {
+  if (!ALLOW_REGISTRATION) {
+    return res.status(403).json({ error: '此站点未开放注册' });
+  }
   try {
     const user = store.createUser({
       email: req.body && req.body.email,

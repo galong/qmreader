@@ -708,6 +708,7 @@ const state = {
   contextPaneWidth: readStoredNumber('qm_context_pane_width'),
   me: null,
   authMode: 'login',
+  registrationEnabled: true,
   aiProfiles: [],
   activeAiProfileId: '',
   rewriteAiProfileId: '',
@@ -1947,6 +1948,8 @@ function recordEntryView(entryId) {
 
 async function loadMe() {
   const data = await api('/api/me');
+  state.registrationEnabled = data.capabilities?.registration !== false;
+  renderRegistrationAvailability();
   setCurrentUser(data.user || null);
   await loadUserEntryStates();
   loadAiProfilesForScope();
@@ -3235,12 +3238,18 @@ function renderSidebarAiSettings() {
 }
 
 function setAuthMode(mode) {
-  state.authMode = mode === 'register' ? 'register' : 'login';
+  state.authMode = mode === 'register' && state.registrationEnabled ? 'register' : 'login';
   $$('.auth-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.mode === state.authMode));
   $('#auth-title').textContent = state.authMode === 'register' ? '注册账号' : '登录';
   $('#auth-submit').textContent = state.authMode === 'register' ? '注册并登录' : '登录';
   $('#auth-name').classList.toggle('hidden', state.authMode !== 'register');
   $('#auth-password').autocomplete = state.authMode === 'register' ? 'new-password' : 'current-password';
+}
+
+function renderRegistrationAvailability() {
+  const registerTab = $('.auth-tab[data-mode="register"]');
+  if (registerTab) registerTab.classList.toggle('hidden', !state.registrationEnabled);
+  if (!state.registrationEnabled && state.authMode === 'register') setAuthMode('login');
 }
 
 function openAuth(mode = 'login') {
