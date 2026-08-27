@@ -2203,19 +2203,23 @@ function autoRewritePolicyState() {
   const options = autoRewritePolicy.serverAiOptions(process.env, { autoRewrite: true });
   try {
     const config = deepseek.getConfig(options);
+    const contentEnabled = autoRewritePolicy.autoRewriteContentEnabled();
     return {
       ...window,
       configured: config.configured,
       provider: config.provider,
       model: config.model,
+      contentEnabled,
       enabledSourceCount: defaultAutoRewriteSourceIds().length,
     };
   } catch (error) {
+    const contentEnabled = autoRewritePolicy.autoRewriteContentEnabled();
     return {
       ...window,
       configured: false,
       provider: options.provider || process.env.AI_PROVIDER || 'deepseek',
       model: options.model || process.env.AI_MODEL || process.env.DEEPSEEK_MODEL || '',
+      contentEnabled,
       enabledSourceCount: defaultAutoRewriteSourceIds().length,
       configError: String(error.message || error).slice(0, 200),
     };

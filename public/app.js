@@ -8166,16 +8166,18 @@ function autoRewriteStatusParts() {
   const auto = state.autoRewrite || {};
   const last = auto.last || {};
   const policy = auto.policy || {};
+  const titleOnly = policy.contentEnabled === false;
+  const taskName = titleOnly ? '标题翻译' : '自动重写';
   const windowMeta = [policy.label, policy.timeZone, `${Number(policy.enabledSourceCount) || 0} 个源`].filter(Boolean).join(' · ');
   const queuedCount = Array.isArray(auto.queuedSourceIds) ? auto.queuedSourceIds.length : 0;
   const running = Boolean(auto.running || last.running);
   const failed = [
-    ...(last.error ? [{ title: '自动重写任务', error: last.error }] : []),
+    ...(last.error ? [{ title: `${taskName}任务`, error: last.error }] : []),
     ...(Array.isArray(last.failed) ? last.failed : []),
   ];
   if (running) {
     return {
-      label: '自动重写中',
+      label: `${taskName}中`,
       value: '后台运行',
       meta: (last.sourceIds || []).map(sourceName).join('、') || '重点源',
       failed,
@@ -8183,7 +8185,7 @@ function autoRewriteStatusParts() {
   }
   if (!policy.configured) {
     return {
-      label: '自动重写',
+      label: taskName,
       value: policy.configError ? '配置错误' : '待配置 API Key',
       meta: [policy.provider, policy.model, windowMeta].filter(Boolean).join(' · '),
       failed: policy.configError ? [{ title: 'AI 配置', error: policy.configError }] : failed,
@@ -8191,24 +8193,30 @@ function autoRewriteStatusParts() {
   }
   if (!policy.open && queuedCount) {
     return {
-      label: '自动重写已排队',
+      label: `${taskName}已排队`,
       value: `${queuedCount} 个源`,
       meta: `${policy.label || '设定时段'} 自动开始 · ${policy.timeZone || ''}`,
       failed,
     };
   }
   if (!last.startedAt) {
-    return { label: '自动重写', value: policy.open ? '时段内待命' : '等待时段', meta: windowMeta || '刷新后处理重点源', failed };
+    return { label: taskName, value: policy.open ? '待命' : '等待时段', meta: windowMeta || '刷新后处理重点源', failed };
   }
-  const value = last.error
+  const value = titleOnly
+    ? (last.error ? opsStatusText(last.error) : `${Number(last.translated) || 0} 个标题`)
+    : last.error
     ? opsStatusText(last.error)
     : last.skipped
     ? opsStatusText(last.skipped)
     : `${Number(last.rewritten) || 0} 新 · ${Number(last.cached) || 0} 缓存 · ${failed.length} 失败`;
   return {
-    label: '自动重写完成',
+    label: `${taskName}完成`,
     value,
-    meta: [formatAssetTime(last.finishedAt || last.startedAt), (last.sourceIds || []).map(sourceName).join('、')].filter(Boolean).join(' · '),
+    meta: [
+      formatAssetTime(last.finishedAt || last.startedAt),
+      (last.sourceIds || []).map(sourceName).join('、'),
+      titleOnly ? '正文按需手工生成' : '',
+    ].filter(Boolean).join(' · '),
     failed,
   };
 }
@@ -8283,7 +8291,7 @@ async function runAutoRewriteFromManage() {
     if (!result.started && !result.running) {
       throw new Error(opsStatusText(result.skipped) || '任务未启动');
     }
-    toast('自动重写已启动');
+    toast(state.autoRewrite?.policy?.contentEnabled === false ? '标题翻译已启动' : '自动重写已启动');
     for (let i = 0; i < 80; i++) {
       await new Promise(r => setTimeout(r, 1500));
       const data = await loadSources();
@@ -8295,7 +8303,7 @@ async function runAutoRewriteFromManage() {
     renderManage();
     if (state.workspacePage === 'admin') renderAdminPage();
   } catch (error) {
-    toast('启动自动重写失败: ' + error.message, 5000);
+    toast(`启动${state.autoRewrite?.policy?.contentEnabled === false ? '标题翻译' : '自动重写'}失败: ${error.message}`, 5000);
     await loadSources().catch(() => null);
     renderManageStatus();
     if (state.workspacePage === 'admin') renderManageStatus('#admin-manage-status');

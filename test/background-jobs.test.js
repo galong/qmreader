@@ -8,6 +8,7 @@ const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qmreader-background-t
 process.env.QMREADER_DATA_DIR = testDataDir;
 
 const fetcher = require('../lib/fetcher');
+const deepseek = require('../lib/deepseek');
 const jobs = require('../lib/background-jobs');
 
 after(() => fs.rmSync(testDataDir, { recursive: true, force: true }));
@@ -119,5 +120,51 @@ test('short Product Hunt official context never falls back to an RSS rewrite sou
     assert.match(prepared.error, /官网正文不足/);
   } finally {
     restore();
+  }
+});
+
+test('title-only AI jobs translate titles without generating article content', async () => {
+  const previousContentEnabled = process.env.AUTO_REWRITE_CONTENT_ENABLED;
+  const previousStartHour = process.env.AUTO_REWRITE_WINDOW_START_HOUR;
+  const previousEndHour = process.env.AUTO_REWRITE_WINDOW_END_HOUR;
+  process.env.AUTO_REWRITE_CONTENT_ENABLED = '0';
+  process.env.AUTO_REWRITE_WINDOW_START_HOUR = '0';
+  process.env.AUTO_REWRITE_WINDOW_END_HOUR = '0';
+
+  let rewriteCalls = 0;
+  let flushCalls = 0;
+  const restoreFetcher = stub(fetcher, {
+    loadDisk: () => {},
+    flushDisk: () => { flushCalls += 1; },
+    getEntries: () => [{
+      id: 'entry-one',
+      sourceId: 'source-one',
+      title: 'An English title',
+      titleZh: '',
+    }],
+  });
+  const restoreDeepseek = stub(deepseek, {
+    getConfig: () => ({ configured: true }),
+    needsTitleTranslation: () => true,
+    translateTitleBatch: async entries => ({ translations: entries.map(entry => ({ id: entry.id })) }),
+    rewriteEntry: async () => { rewriteCalls += 1; },
+  });
+
+  try {
+    const result = await jobs.runRefreshJob({ kind: 'auto-rewrite', sourceIds: ['source-one'] });
+    assert.equal(result.translated, 1);
+    assert.equal(result.autoRewrite.contentEnabled, false);
+    assert.equal(result.autoRewrite.skipped, 'content rewrite disabled');
+    assert.equal(rewriteCalls, 0);
+    assert.equal(flushCalls, 1);
+  } finally {
+    restoreFetcher();
+    restoreDeepseek();
+    if (previousContentEnabled === undefined) delete process.env.AUTO_REWRITE_CONTENT_ENABLED;
+    else process.env.AUTO_REWRITE_CONTENT_ENABLED = previousContentEnabled;
+    if (previousStartHour === undefined) delete process.env.AUTO_REWRITE_WINDOW_START_HOUR;
+    else process.env.AUTO_REWRITE_WINDOW_START_HOUR = previousStartHour;
+    if (previousEndHour === undefined) delete process.env.AUTO_REWRITE_WINDOW_END_HOUR;
+    else process.env.AUTO_REWRITE_WINDOW_END_HOUR = previousEndHour;
   }
 });

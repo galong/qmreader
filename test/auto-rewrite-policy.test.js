@@ -20,6 +20,17 @@ test('automatic rewrite window supports ranges crossing midnight', () => {
   assert.equal(policy.isHourInWindow(2, 22, 3), true);
   assert.equal(policy.isHourInWindow(3, 22, 3), false);
   assert.equal(policy.isHourInWindow(12, 0, 0), true);
+  assert.equal(policy.autoRewriteWindowStatus(new Date(), {
+    AUTO_REWRITE_WINDOW_START_HOUR: '0',
+    AUTO_REWRITE_WINDOW_END_HOUR: '0',
+  }).label, '全天');
+});
+
+test('automatic content generation can be disabled without disabling title translation', () => {
+  assert.equal(policy.autoRewriteContentEnabled({}), true);
+  assert.equal(policy.autoRewriteContentEnabled({ AUTO_REWRITE_CONTENT_ENABLED: '1' }), true);
+  assert.equal(policy.autoRewriteContentEnabled({ AUTO_REWRITE_CONTENT_ENABLED: '0' }), false);
+  assert.equal(policy.autoRewriteContentEnabled({ AUTO_REWRITE_CONTENT_ENABLED: 'off' }), false);
 });
 
 test('custom server AI options contain protocol settings but never the API key', () => {
