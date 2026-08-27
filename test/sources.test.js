@@ -21,6 +21,12 @@ test('requested fintech feeds are enabled news sources', () => {
     assert.ok(source, `missing source: ${id}`);
     assert.equal(source.category, 'news');
     assert.equal(source.enabled, true);
+    assert.equal(source.autoRewriteEnabled, true);
     assert.deepEqual(source.feeds, [feedUrl]);
   }
+
+  const unexpectedDefaults = SOURCES
+    .filter(source => source.autoRewriteEnabled && !Object.hasOwn(expectedFeeds, source.id))
+    .map(source => source.id);
+  assert.deepEqual(unexpectedDefaults, []);
 });

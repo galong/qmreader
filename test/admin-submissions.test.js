@@ -407,7 +407,10 @@ test('admin API previews and deletes one reader submissions with permission and 
     assert.equal(restoreResponse.status, 200);
     assert.equal((await restoreResponse.json()).user.disabled, false);
   } finally {
-    child.kill('SIGTERM');
-    await new Promise(resolve => child.once('exit', resolve));
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise(resolve => child.once('exit', resolve));
+      child.kill('SIGTERM');
+      await exited;
+    }
   }
 });

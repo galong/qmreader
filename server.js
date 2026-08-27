@@ -7,6 +7,7 @@ const fetcher = require('./lib/fetcher');
 const deepseek = require('./lib/deepseek');
 const { requestAiConfig } = require('./lib/request-ai-config');
 const store = require('./lib/store');
+const autoRewritePolicy = require('./lib/auto-rewrite-policy');
 
 const app = express();
 app.disable('x-powered-by');
@@ -26,10 +27,8 @@ const ARTICLE_REFRESH_INTERVAL_MS = parseInt(process.env.ARTICLE_REFRESH_INTERVA
 const PODCAST_REFRESH_INTERVAL_MS = parseInt(process.env.PODCAST_REFRESH_INTERVAL_MS || `${6 * HOUR_MS}`, 10);
 const TITLE_TRANSLATION_LIMIT = parseInt(process.env.TITLE_TRANSLATION_LIMIT || '80', 10);
 const ALLOW_REGISTRATION = String(process.env.ALLOW_REGISTRATION || '1').trim() !== '0';
-const AUTO_REWRITE_SOURCE_IDS = new Set(String(process.env.AUTO_REWRITE_SOURCE_IDS || '')
-  .split(',')
-  .map(id => id.trim())
-  .filter(Boolean));
+const AUTO_REWRITE_SCHEDULE_INTERVAL_MS = parseInt(process.env.AUTO_REWRITE_SCHEDULE_INTERVAL_MS || `${MINUTE_MS}`, 10);
+const AUTO_REWRITE_SCHEDULE_STARTUP_DELAY_MS = parseInt(process.env.AUTO_REWRITE_SCHEDULE_STARTUP_DELAY_MS || '10000', 10);
 const SESSION_COOKIE = 'qm_session';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const INDEX_PATH = path.join(__dirname, 'public', 'index.html');
@@ -111,6 +110,7 @@ let aiLast = null;
 const aiQueuedSourceIds = new Set();
 let autoRewriteRunning = false;
 let autoRewriteLast = null;
+let autoRewriteWindowAttemptKey = '';
 const sourceInteractionRefreshAt = new Map();
 const faviconCache = new Map();
 const faviconInFlight = new Map();
@@ -2192,11 +2192,34 @@ function normalizeBackgroundJob(job = {}) {
 }
 
 function defaultAutoRewriteSourceIds() {
-  if (AUTO_REWRITE_SOURCE_IDS.size) return Array.from(AUTO_REWRITE_SOURCE_IDS);
   return fetcher.getSourcesMeta()
-    .filter(source => source && source.enabled)
+    .filter(source => source && source.enabled && source.autoRewriteEnabled)
     .map(source => source.id)
     .filter(Boolean);
+}
+
+function autoRewritePolicyState() {
+  const window = autoRewritePolicy.autoRewriteWindowStatus();
+  const options = autoRewritePolicy.serverAiOptions(process.env, { autoRewrite: true });
+  try {
+    const config = deepseek.getConfig(options);
+    return {
+      ...window,
+      configured: config.configured,
+      provider: config.provider,
+      model: config.model,
+      enabledSourceCount: defaultAutoRewriteSourceIds().length,
+    };
+  } catch (error) {
+    return {
+      ...window,
+      configured: false,
+      provider: options.provider || process.env.AI_PROVIDER || 'deepseek',
+      model: options.model || process.env.AI_MODEL || process.env.DEEPSEEK_MODEL || '',
+      enabledSourceCount: defaultAutoRewriteSourceIds().length,
+      configError: String(error.message || error).slice(0, 200),
+    };
+  }
 }
 
 function defaultRefreshSourceIds() {
@@ -2225,6 +2248,7 @@ function backgroundJobState() {
       job: aiJob,
       last: aiLast,
       queuedSourceIds: Array.from(aiQueuedSourceIds),
+      policy: autoRewritePolicyState(),
     },
   };
 }
@@ -2249,7 +2273,8 @@ function autoRewriteSourceIdsFromRefresh(refresh, job = {}) {
 }
 
 function queueAutoRewriteForRefresh(refresh, job = {}) {
-  const sourceIds = autoRewriteSourceIdsFromRefresh(refresh, job);
+  const allowed = new Set(defaultAutoRewriteSourceIds());
+  const sourceIds = autoRewriteSourceIdsFromRefresh(refresh, job).filter(id => allowed.has(id));
   if (!sourceIds.length) return { started: false, skipped: 'no changed sources' };
   return startAutoRewriteJob({
     kind: 'auto-rewrite',
@@ -2306,9 +2331,8 @@ function finishAiJob({ result = null, error = null, code = 0, signal = '' } = {}
   aiWorker = null;
   aiJob = null;
   reloadFetcherAfterWorker();
-  if (aiQueuedSourceIds.size) {
+  if (aiQueuedSourceIds.size && autoRewritePolicy.autoRewriteWindowStatus().open) {
     const queued = Array.from(aiQueuedSourceIds);
-    aiQueuedSourceIds.clear();
     setTimeout(() => startAutoRewriteJob({
       kind: 'auto-rewrite',
       sourceIds: queued,
@@ -2418,8 +2442,23 @@ function startFetchJob(job = {}) {
 function startAutoRewriteJob(job = {}) {
   const normalized = { ...normalizeBackgroundJob(job), kind: 'auto-rewrite' };
   const sourceIds = normalized.sourceIds.length ? normalized.sourceIds : defaultAutoRewriteSourceIds();
-  const uniqueSourceIds = [...new Set(sourceIds)];
+  const allowed = new Set(defaultAutoRewriteSourceIds());
+  const uniqueSourceIds = [...new Set(sourceIds)].filter(id => allowed.has(id));
   if (!uniqueSourceIds.length) return { started: false, skipped: 'no sources configured' };
+  const policy = autoRewritePolicyState();
+  if (!policy.configured) {
+    return { started: false, skipped: policy.configError || 'AI not configured', policy };
+  }
+  if (!policy.open) {
+    for (const id of uniqueSourceIds) aiQueuedSourceIds.add(id);
+    return {
+      started: false,
+      scheduled: true,
+      skipped: 'outside auto-rewrite window',
+      queuedSourceIds: Array.from(aiQueuedSourceIds),
+      policy,
+    };
+  }
   if (aiWorker) {
     for (const id of uniqueSourceIds) aiQueuedSourceIds.add(id);
     return {
@@ -2428,9 +2467,11 @@ function startAutoRewriteJob(job = {}) {
       queuedSourceIds: Array.from(aiQueuedSourceIds),
       job: aiJob,
       autoRewrite: { running: autoRewriteRunning, last: autoRewriteLast },
+      policy,
     };
   }
 
+  for (const id of uniqueSourceIds) aiQueuedSourceIds.delete(id);
   const startedAt = Date.now();
   aiJob = { ...normalized, sourceIds: uniqueSourceIds, startedAt };
   aiLast = null;
@@ -2502,6 +2543,7 @@ function startAutoRewriteJob(job = {}) {
     running: true,
     job: aiJob,
     autoRewrite: { running: autoRewriteRunning, last: autoRewriteLast },
+    policy,
   };
 }
 
@@ -2673,12 +2715,42 @@ function scheduleFreshnessRefresh() {
   }, delay);
 }
 
+function triggerAutoRewriteWindow() {
+  const window = autoRewritePolicy.autoRewriteWindowStatus();
+  if (!window.open || autoRewriteWindowAttemptKey === window.dateKey) return;
+  autoRewriteWindowAttemptKey = window.dateKey;
+  startAutoRewriteJob({
+    kind: 'auto-rewrite',
+    sourceIds: defaultAutoRewriteSourceIds(),
+    reason: 'scheduled-window',
+  });
+}
+
+function scheduleAutoRewriteWindow() {
+  const interval = Number.isFinite(AUTO_REWRITE_SCHEDULE_INTERVAL_MS)
+    ? Math.max(MINUTE_MS, AUTO_REWRITE_SCHEDULE_INTERVAL_MS)
+    : MINUTE_MS;
+  const delay = Number.isFinite(AUTO_REWRITE_SCHEDULE_STARTUP_DELAY_MS)
+    ? Math.max(0, AUTO_REWRITE_SCHEDULE_STARTUP_DELAY_MS)
+    : 10000;
+  setTimeout(() => {
+    triggerAutoRewriteWindow();
+    setInterval(triggerAutoRewriteWindow, interval);
+  }, delay);
+}
+
 app.get('/api/sources', (req, res) => {
+  const policy = autoRewritePolicyState();
   res.json({
     sources: fetcher.getSourcesMeta(),
     refreshing,
     progress: refreshProgress,
-    autoRewrite: { running: autoRewriteRunning, last: autoRewriteLast },
+    autoRewrite: {
+      running: autoRewriteRunning,
+      last: autoRewriteLast,
+      queuedSourceIds: Array.from(aiQueuedSourceIds),
+      policy,
+    },
     backgroundJob: backgroundJobState(),
   });
 });
@@ -2708,6 +2780,18 @@ app.post('/api/admin/sources/:id/restore', requireAdmin, (req, res) => {
   fetcher.setHidden(src.id, false);
   fetcher.flushDisk();
   res.json({ id: src.id, hidden: false, enabled: fetcher.isEnabled(src) });
+});
+
+app.post('/api/admin/sources/:id/auto-rewrite', requireAdmin, (req, res) => {
+  const src = fetcher.getSourceById(req.params.id);
+  if (!src) return res.status(404).json({ error: 'source not found' });
+  if (src.manual) return res.status(400).json({ error: '这个信息源不支持后台自动处理' });
+  const requested = req.body && req.body.enabled;
+  const enabled = typeof requested === 'boolean' ? requested : !fetcher.isAutoRewriteEnabled(src);
+  fetcher.setAutoRewriteEnabled(src.id, enabled);
+  fetcher.flushDisk();
+  if (!enabled) aiQueuedSourceIds.delete(src.id);
+  res.json({ id: src.id, autoRewriteEnabled: enabled, policy: autoRewritePolicyState() });
 });
 
 app.post('/api/sources/:id/refresh-hint', (req, res) => {
@@ -3493,7 +3577,7 @@ app.post('/api/auto-rewrite', requireAdmin, async (req, res) => {
   try {
     const requested = Array.isArray(req.body && req.body.sourceIds) ? req.body.sourceIds : [];
     const sourceIds = requested.length ? requested : defaultAutoRewriteSourceIds();
-    const result = startBackgroundJob({ kind: 'auto-rewrite', sourceIds });
+    const result = startBackgroundJob({ kind: 'auto-rewrite', sourceIds, reason: 'admin' });
     res.json({ autoRewrite: result });
   } catch (e) {
     sendError(res, e, 'auto rewrite failed');
@@ -3544,4 +3628,5 @@ app.listen(PORT, HOST, () => {
   scheduleStartupRefresh();
   scheduleDailyRefresh();
   scheduleFreshnessRefresh();
+  scheduleAutoRewriteWindow();
 });
