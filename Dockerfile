@@ -1,4 +1,4 @@
-FROM node:26-slim
+FROM node:26-slim@sha256:5758d367d7b4f48b73a9bb3530e687e47efb289f3b43f9c0450a25225ae0db5d
 
 WORKDIR /app
 ENV NODE_ENV=production

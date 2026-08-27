@@ -4,6 +4,7 @@ node_modules/
 .env.local
 .env.*
 !.env.example
+.deploy.env
 data/cache.json
 data/state.json
 data/insights.json
