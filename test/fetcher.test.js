@@ -421,6 +421,25 @@ test('cache merge overlays only sources changed by the current process', () => {
   });
 });
 
+test('source removal is persisted, excluded from public metadata, and reversible', () => {
+  const source = fetcher.getSourceById('james-clear');
+  assert.ok(source);
+
+  fetcher.setHidden(source.id, true);
+  fetcher.flushDisk();
+  assert.equal(fetcher.isHidden(source), true);
+  assert.equal(fetcher.isEnabled(source), false);
+  assert.equal(fetcher.getSourcesMeta().some(item => item.id === source.id), false);
+  assert.equal(fetcher.getSourcesMeta({ includeHidden: true }).find(item => item.id === source.id).hidden, true);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(testDataDir, 'state.json'), 'utf8'))[source.id].hidden, true);
+
+  fetcher.setHidden(source.id, false);
+  fetcher.flushDisk();
+  assert.equal(fetcher.isHidden(source), false);
+  assert.equal(fetcher.isEnabled(source), true);
+  assert.equal(fetcher.getSourcesMeta().some(item => item.id === source.id), true);
+});
+
 test('full-source merge keeps a newer original-content enrichment without reverting feed metadata', () => {
   const { mergeCacheSources } = fetcher.__test;
   const latest = {

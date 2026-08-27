@@ -609,6 +609,7 @@ function historyEntriesForStorage(map) {
 
 const state = {
   sources: [],
+  adminSources: [],
   entries: [],
   entryRenderLimit: ENTRY_RENDER_BATCH_SIZE,
   contributors: [],
@@ -1662,6 +1663,16 @@ async function loadSources() {
   if (!$('#manage-modal')?.classList.contains('hidden')) renderManageStatus();
   if (state.workspacePage === 'admin') renderManageStatus('#admin-manage-status');
   renderSourceRefreshButton();
+  return data;
+}
+
+async function loadAdminSources() {
+  if (!isAdmin()) {
+    state.adminSources = [];
+    return { sources: [] };
+  }
+  const data = await api('/api/admin/sources');
+  state.adminSources = data.sources || [];
   return data;
 }
 
@@ -8262,13 +8273,23 @@ function renderManage(target = '#manage-list', statusTarget = '#manage-status') 
   const el = $(target);
   if (!el) return;
   el.innerHTML = '';
-  const sorted = [...state.sources].sort((a, b) => (b.enabled - a.enabled) || a.category.localeCompare(b.category));
+  const managedSources = isAdmin() && state.adminSources.length ? state.adminSources : state.sources;
+  const sorted = [...managedSources].sort((a, b) => (
+    Number(a.hidden) - Number(b.hidden)
+    || (b.enabled - a.enabled)
+    || a.category.localeCompare(b.category)
+  ));
   for (const s of sorted) {
     const row = document.createElement('div');
-    row.className = 'manage-row';
-    const statusTxt = s.enabled
+    row.className = `manage-row${s.hidden ? ' removed' : ''}`;
+    const statusTxt = s.hidden
+      ? '已移除'
+      : s.enabled
       ? (s.status === 'ok' ? `${s.entryCount} 篇` : s.status === 'error' ? '抓取失败' : s.status === 'stale' ? '缓存' : '待抓取')
       : '已禁用';
+    const sourceAction = isAdmin() && s.removable
+      ? `<button class="source-row-action ghost-btn ${s.hidden ? '' : 'danger'}" type="button" data-source-action="${s.hidden ? 'restore' : 'remove'}">${s.hidden ? '恢复' : '移除'}</button>`
+      : '';
     row.innerHTML = `
       ${faviconHtml(s.siteUrl, s.name)}
       <div class="m-info">
@@ -8276,21 +8297,63 @@ function renderManage(target = '#manage-list', statusTarget = '#manage-status') 
         ${s.note || s.description ? `<div class="m-note">${escapeHtml(s.note || s.description)}</div>` : ''}
       </div>
       <span class="m-status ${s.status === 'error' ? 'error' : s.status === 'ok' ? 'ok' : ''}">${statusTxt}</span>
-      <button class="switch ${s.enabled ? 'on' : ''}" title="${s.enabled ? '点击禁用' : '点击启用'}"></button>`;
-    row.querySelector('.switch').onclick = async (ev) => {
-      ev.stopPropagation();
-      const r = await api(`/api/sources/${s.id}/toggle`, { method: 'POST' });
-      s.enabled = r.enabled;
-      toast(`${s.name} ${r.enabled ? '已启用（抓取中…）' : '已禁用'}`);
-      renderManage(target, statusTarget);
-      setTimeout(async () => {
-        await loadSources();
+      <div class="source-row-actions">
+        ${s.hidden ? '' : `<button class="switch ${s.enabled ? 'on' : ''}" title="${s.enabled ? '点击禁用' : '点击启用'}"></button>`}
+        ${sourceAction}
+      </div>`;
+    const toggle = row.querySelector('.switch');
+    if (toggle) toggle.onclick = async (ev) => {
+        ev.stopPropagation();
+        const r = await api(`/api/sources/${s.id}/toggle`, { method: 'POST' });
+        s.enabled = r.enabled;
+        toast(`${s.name} ${r.enabled ? '已启用（抓取中…）' : '已禁用'}`);
         renderManage(target, statusTarget);
-        reload({ keepReader: true });
-      }, r.enabled ? 4000 : 0);
+        setTimeout(async () => {
+          await Promise.all([loadSources(), loadAdminSources()]);
+          renderManage(target, statusTarget);
+          reload({ keepReader: true });
+        }, r.enabled ? 4000 : 0);
+      };
+    const action = row.querySelector('[data-source-action]');
+    if (action) action.onclick = async (ev) => {
+      ev.stopPropagation();
+      if (action.dataset.sourceAction === 'restore') await restoreManagedSource(s, target, statusTarget);
+      else await removeManagedSource(s, target, statusTarget);
     };
     el.appendChild(row);
   }
+}
+
+async function reloadManagedSources(target, statusTarget) {
+  await Promise.all([loadSources(), loadAdminSources()]);
+  await reload({ keepReader: true });
+  renderManage(target, statusTarget);
+  if (state.workspacePage === 'admin') renderAdminPage();
+}
+
+async function removeManagedSource(source, target, statusTarget) {
+  const ok = await showConfirmDialog({
+    title: '移除订阅源',
+    message: `确认移除「${source.name}」？它会停止抓取并从阅读界面隐藏，已有翻译、点评等数据会保留，之后可以恢复。`,
+    confirmText: '移除',
+    danger: true,
+  });
+  if (!ok) return;
+  await api(`/api/admin/sources/${encodeURIComponent(source.id)}`, { method: 'DELETE' });
+  await reloadManagedSources(target, statusTarget);
+  toast(`${source.name} 已移除`);
+}
+
+async function restoreManagedSource(source, target, statusTarget) {
+  await api(`/api/admin/sources/${encodeURIComponent(source.id)}/restore`, { method: 'POST' });
+  await reloadManagedSources(target, statusTarget);
+  toast(`${source.name} 已恢复`);
+}
+
+async function openManageModal() {
+  if (isAdmin()) await loadAdminSources().catch(error => toast('加载订阅源失败: ' + error.message, 5000));
+  renderManage();
+  $('#manage-modal').classList.remove('hidden');
 }
 
 function renderAdminPage() {
@@ -8563,6 +8626,7 @@ async function openAdminPage({ push = true } = {}) {
   setWorkspacePage('admin');
   state.activeEntry = null;
   document.title = '系统后台 · QMReader';
+  await loadAdminSources().catch(error => toast('加载订阅源失败: ' + error.message, 5000));
   renderAdminPage();
   if (push) {
     const url = adminUrlFor();
@@ -9794,7 +9858,7 @@ $('#profile-manage-btn').onclick = () => {
   openAdminPage();
 };
 $('#admin-refresh-btn').onclick = refreshAll;
-$('#admin-manage-modal-btn').onclick = () => { renderManage(); $('#manage-modal').classList.remove('hidden'); };
+$('#admin-manage-modal-btn').onclick = openManageModal;
 $('#admin-back-dashboard').onclick = () => openMyCommentsModal({ tab: 'profile' });
 $('#admin-close').onclick = closeAdminPage;
 $('#admin-submission-search-form').onsubmit = (event) => {
@@ -9975,7 +10039,7 @@ $('#reader-font-size-up').onclick = () => setReaderPref('fontSize', state.reader
 $('#reader-line-height').oninput = (e) => setReaderPref('lineHeight', e.target.value);
 $('#reader-measure').oninput = (e) => setReaderPref('measure', e.target.value);
 $('#reader-font-family').onchange = (e) => setReaderPref('font', e.target.value);
-$('#manage-btn').onclick = () => { renderManage(); $('#manage-modal').classList.remove('hidden'); };
+$('#manage-btn').onclick = openManageModal;
 $('#manage-close').onclick = () => $('#manage-modal').classList.add('hidden');
 $('#manage-modal').onclick = (e) => { if (e.target.id === 'manage-modal') $('#manage-modal').classList.add('hidden'); };
 $('#auth-open').onclick = () => openAuth('login');

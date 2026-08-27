@@ -2683,6 +2683,27 @@ app.get('/api/sources', (req, res) => {
   });
 });
 
+app.get('/api/admin/sources', requireAdmin, (req, res) => {
+  res.json({ sources: fetcher.getSourcesMeta({ includeHidden: true }) });
+});
+
+app.delete('/api/admin/sources/:id', requireAdmin, (req, res) => {
+  const src = fetcher.getSourceById(req.params.id);
+  if (!src) return res.status(404).json({ error: 'source not found' });
+  if (src.id === 'user-submitted') return res.status(400).json({ error: '读者提交源不能移除' });
+  fetcher.setHidden(src.id, true);
+  fetcher.flushDisk();
+  res.json({ id: src.id, hidden: true });
+});
+
+app.post('/api/admin/sources/:id/restore', requireAdmin, (req, res) => {
+  const src = fetcher.getSourceById(req.params.id);
+  if (!src) return res.status(404).json({ error: 'source not found' });
+  fetcher.setHidden(src.id, false);
+  fetcher.flushDisk();
+  res.json({ id: src.id, hidden: false, enabled: fetcher.isEnabled(src) });
+});
+
 app.post('/api/sources/:id/refresh-hint', (req, res) => {
   try {
     const refresh = triggerSourceInteractionRefresh(req.params.id, 'source-interaction');
@@ -3478,6 +3499,7 @@ app.post('/api/refresh', requireLogin, async (req, res) => {
   if (sourceId) {
     const src = fetcher.getSourceById(sourceId);
     if (!src) return res.status(404).json({ error: 'source not found' });
+    if (fetcher.isHidden(src)) return res.status(410).json({ error: '这个信息源已移除' });
     if (!fetcher.isEnabled(src) && req.user.role !== 'admin') {
       return res.status(403).json({ error: '这个信息源暂未启用' });
     }
