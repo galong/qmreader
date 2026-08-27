@@ -2687,6 +2687,12 @@ app.get('/api/admin/sources', requireAdmin, (req, res) => {
   res.json({ sources: fetcher.getSourcesMeta({ includeHidden: true }) });
 });
 
+app.post('/api/admin/sources/remove-disabled', requireAdmin, (req, res) => {
+  const ids = fetcher.hideDisabledSources();
+  fetcher.flushDisk();
+  res.json({ ids, removed: ids.length });
+});
+
 app.delete('/api/admin/sources/:id', requireAdmin, (req, res) => {
   const src = fetcher.getSourceById(req.params.id);
   if (!src) return res.status(404).json({ error: 'source not found' });

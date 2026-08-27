@@ -440,6 +440,24 @@ test('source removal is persisted, excluded from public metadata, and reversible
   assert.equal(fetcher.getSourcesMeta().some(item => item.id === source.id), true);
 });
 
+test('bulk removal hides disabled sources while preserving enabled and system sources', () => {
+  const enabledSource = fetcher.getSourceById('qiaomu-blog');
+  const disabledSource = fetcher.getSourceById('reddit_ai');
+  const systemSource = fetcher.getSourceById('user-submitted');
+
+  const hiddenIds = fetcher.hideDisabledSources();
+  fetcher.flushDisk();
+  assert.equal(hiddenIds.includes(disabledSource.id), true);
+  assert.equal(hiddenIds.includes(enabledSource.id), false);
+  assert.equal(hiddenIds.includes(systemSource.id), false);
+  assert.equal(fetcher.isHidden(disabledSource), true);
+  assert.equal(fetcher.isHidden(enabledSource), false);
+  assert.equal(fetcher.isHidden(systemSource), false);
+
+  for (const id of hiddenIds) fetcher.setHidden(id, false);
+  fetcher.flushDisk();
+});
+
 test('full-source merge keeps a newer original-content enrichment without reverting feed metadata', () => {
   const { mergeCacheSources } = fetcher.__test;
   const latest = {

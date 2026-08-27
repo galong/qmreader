@@ -8350,6 +8350,24 @@ async function restoreManagedSource(source, target, statusTarget) {
   toast(`${source.name} 已恢复`);
 }
 
+async function removeDisabledSources() {
+  const removable = state.adminSources.filter(source => !source.hidden && !source.enabled && source.removable);
+  if (!removable.length) {
+    toast('没有可移除的已禁用订阅源');
+    return;
+  }
+  const ok = await showConfirmDialog({
+    title: '批量移除已禁用源',
+    message: `确认移除 ${removable.length} 个已禁用订阅源？当前启用的源和“读者提交”会保留，移除后仍可逐个恢复。`,
+    confirmText: `移除 ${removable.length} 个`,
+    danger: true,
+  });
+  if (!ok) return;
+  const result = await api('/api/admin/sources/remove-disabled', { method: 'POST' });
+  await reloadManagedSources('#admin-manage-list', '#admin-manage-status');
+  toast(`已移除 ${result.removed || 0} 个订阅源`);
+}
+
 async function openManageModal() {
   if (isAdmin()) await loadAdminSources().catch(error => toast('加载订阅源失败: ' + error.message, 5000));
   renderManage();
@@ -8373,6 +8391,12 @@ function renderAdminPage() {
     setButtonIconLabel(refreshBtn, state.refreshing ? 'loader-circle' : 'refresh-cw', state.refreshing ? '刷新中…' : '刷新全部', {
       className: state.refreshing ? 'app-icon app-icon-spin' : 'app-icon',
     });
+  }
+  const removeDisabledBtn = $('#admin-remove-disabled-btn');
+  if (removeDisabledBtn) {
+    const removableCount = state.adminSources.filter(source => !source.hidden && !source.enabled && source.removable).length;
+    removeDisabledBtn.disabled = removableCount === 0;
+    removeDisabledBtn.textContent = removableCount ? `移除已禁用源（${removableCount}）` : '没有可移除源';
   }
 }
 
@@ -9859,6 +9883,7 @@ $('#profile-manage-btn').onclick = () => {
 };
 $('#admin-refresh-btn').onclick = refreshAll;
 $('#admin-manage-modal-btn').onclick = openManageModal;
+$('#admin-remove-disabled-btn').onclick = removeDisabledSources;
 $('#admin-back-dashboard').onclick = () => openMyCommentsModal({ tab: 'profile' });
 $('#admin-close').onclick = closeAdminPage;
 $('#admin-submission-search-form').onsubmit = (event) => {
