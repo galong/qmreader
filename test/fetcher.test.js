@@ -440,6 +440,21 @@ test('source removal is persisted, excluded from public metadata, and reversible
   assert.equal(fetcher.getSourcesMeta().some(item => item.id === source.id), true);
 });
 
+test('per-source automatic rewrite setting is persisted and exposed in metadata', () => {
+  const source = fetcher.getSourceById('fintechnews-america');
+  assert.ok(source);
+  assert.equal(fetcher.isAutoRewriteEnabled(source), true);
+
+  fetcher.setAutoRewriteEnabled(source.id, false);
+  fetcher.flushDisk();
+  assert.equal(fetcher.isAutoRewriteEnabled(source), false);
+  assert.equal(fetcher.getSourcesMeta().find(item => item.id === source.id).autoRewriteEnabled, false);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(testDataDir, 'state.json'), 'utf8'))[source.id].autoRewriteEnabled, false);
+
+  fetcher.setAutoRewriteEnabled(source.id, true);
+  fetcher.flushDisk();
+});
+
 test('bulk removal hides disabled sources while preserving enabled and system sources', () => {
   const enabledSource = fetcher.getSourceById('qiaomu-blog');
   const disabledSource = fetcher.getSourceById('reddit_ai');

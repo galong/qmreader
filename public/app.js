@@ -632,7 +632,7 @@ const state = {
   refreshing: false,
   refreshProgress: { done: 0, total: 0 },
   sourceRefreshStatusTimer: null,
-  autoRewrite: { running: false, last: null },
+  autoRewrite: { running: false, last: null, queuedSourceIds: [], policy: null },
   activeEntry: null,
   guestRead: new Set(readJson('fr_read', '[]')),
   guestStarred: new Set(readJson('fr_starred', '[]')),
@@ -1659,7 +1659,7 @@ async function loadSources() {
   state.sources = data.sources;
   state.refreshing = Boolean(data.refreshing);
   state.refreshProgress = data.progress || { done: 0, total: 0 };
-  state.autoRewrite = data.autoRewrite || { running: false, last: null };
+  state.autoRewrite = data.autoRewrite || { running: false, last: null, queuedSourceIds: [], policy: null };
   if (!$('#manage-modal')?.classList.contains('hidden')) renderManageStatus();
   if (state.workspacePage === 'admin') renderManageStatus('#admin-manage-status');
   renderSourceRefreshButton();
@@ -8158,12 +8158,16 @@ function opsStatusText(value) {
   if (text === 'AI not configured') return '站点 API Key 未配置';
   if (text === 'already running') return '已有任务运行中';
   if (text === 'no sources configured') return '未配置重点源';
+  if (text === 'outside auto-rewrite window') return '等待自动处理时段';
   return text;
 }
 
 function autoRewriteStatusParts() {
   const auto = state.autoRewrite || {};
   const last = auto.last || {};
+  const policy = auto.policy || {};
+  const windowMeta = [policy.label, policy.timeZone, `${Number(policy.enabledSourceCount) || 0} 个源`].filter(Boolean).join(' · ');
+  const queuedCount = Array.isArray(auto.queuedSourceIds) ? auto.queuedSourceIds.length : 0;
   const running = Boolean(auto.running || last.running);
   const failed = [
     ...(last.error ? [{ title: '自动重写任务', error: last.error }] : []),
@@ -8177,8 +8181,24 @@ function autoRewriteStatusParts() {
       failed,
     };
   }
+  if (!policy.configured) {
+    return {
+      label: '自动重写',
+      value: policy.configError ? '配置错误' : '待配置 API Key',
+      meta: [policy.provider, policy.model, windowMeta].filter(Boolean).join(' · '),
+      failed: policy.configError ? [{ title: 'AI 配置', error: policy.configError }] : failed,
+    };
+  }
+  if (!policy.open && queuedCount) {
+    return {
+      label: '自动重写已排队',
+      value: `${queuedCount} 个源`,
+      meta: `${policy.label || '设定时段'} 自动开始 · ${policy.timeZone || ''}`,
+      failed,
+    };
+  }
   if (!last.startedAt) {
-    return { label: '自动重写', value: '待命', meta: '刷新后处理重点源', failed };
+    return { label: '自动重写', value: policy.open ? '时段内待命' : '等待时段', meta: windowMeta || '刷新后处理重点源', failed };
   }
   const value = last.error
     ? opsStatusText(last.error)
@@ -8205,6 +8225,9 @@ function renderManageStatus(target = '#manage-status') {
   const refreshMeta = state.refreshing ? '刷新中' : '最近刷新状态';
   const rewrite = autoRewriteStatusParts();
   const failures = rewrite.failed.slice(0, 3);
+  const policy = state.autoRewrite?.policy || {};
+  const actionDisabled = Boolean(state.autoRewrite?.running || !policy.configured);
+  const actionLabel = policy.open ? '运行' : '排队';
   el.innerHTML = `
     <div class="manage-status-grid">
       <div class="manage-status-item">
@@ -8221,7 +8244,7 @@ function renderManageStatus(target = '#manage-status') {
         <span>${escapeHtml(rewrite.label)}</span>
         <div class="manage-status-action-row">
           <strong>${escapeHtml(rewrite.value)}</strong>
-          <button id="${actionId}" class="manage-status-action" type="button" ${state.autoRewrite?.running ? 'disabled' : ''}>运行</button>
+          <button id="${actionId}" class="manage-status-action" type="button" ${actionDisabled ? 'disabled' : ''}>${actionLabel}</button>
         </div>
         <em title="${escapeHtml(rewrite.meta)}">${escapeHtml(rewrite.meta || '无运行记录')}</em>
       </div>
@@ -8244,11 +8267,22 @@ async function runAutoRewriteFromManage() {
     btn.textContent = '运行中';
   }
   try {
-    await api('/api/auto-rewrite', {
+    const response = await api('/api/auto-rewrite', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{}',
     });
+    const result = response.autoRewrite || {};
+    if (result.scheduled) {
+      toast(`已排队，将在 ${result.policy?.label || '设定时段'} 自动处理`);
+      await loadSources();
+      renderManage();
+      if (state.workspacePage === 'admin') renderAdminPage();
+      return;
+    }
+    if (!result.started && !result.running) {
+      throw new Error(opsStatusText(result.skipped) || '任务未启动');
+    }
     toast('自动重写已启动');
     for (let i = 0; i < 80; i++) {
       await new Promise(r => setTimeout(r, 1500));
@@ -8290,6 +8324,12 @@ function renderManage(target = '#manage-list', statusTarget = '#manage-status') 
     const sourceAction = isAdmin() && s.removable
       ? `<button class="source-row-action ghost-btn ${s.hidden ? '' : 'danger'}" type="button" data-source-action="${s.hidden ? 'restore' : 'remove'}">${s.hidden ? '恢复' : '移除'}</button>`
       : '';
+    const autoRewriteControl = isAdmin() && s.autoRewriteEligible && !s.hidden
+      ? `<div class="source-ai-control" title="${s.autoRewriteEnabled ? '关闭这个源的后台 AI 自动处理' : '开启这个源的后台 AI 自动处理'}">
+          <span>AI</span>
+          <button class="switch source-ai-switch ${s.autoRewriteEnabled ? 'on' : ''}" type="button" aria-label="${s.autoRewriteEnabled ? '关闭' : '开启'} ${escapeHtml(s.name)} 的后台 AI 自动处理" aria-pressed="${Boolean(s.autoRewriteEnabled)}"></button>
+        </div>`
+      : '';
     row.innerHTML = `
       ${faviconHtml(s.siteUrl, s.name)}
       <div class="m-info">
@@ -8298,10 +8338,25 @@ function renderManage(target = '#manage-list', statusTarget = '#manage-status') 
       </div>
       <span class="m-status ${s.status === 'error' ? 'error' : s.status === 'ok' ? 'ok' : ''}">${statusTxt}</span>
       <div class="source-row-actions">
-        ${s.hidden ? '' : `<button class="switch ${s.enabled ? 'on' : ''}" title="${s.enabled ? '点击禁用' : '点击启用'}"></button>`}
+        ${autoRewriteControl}
+        ${s.hidden ? '' : `<button class="switch source-enabled-switch ${s.enabled ? 'on' : ''}" type="button" title="${s.enabled ? '点击禁用订阅源' : '点击启用订阅源'}" aria-label="${s.enabled ? '禁用' : '启用'} ${escapeHtml(s.name)}" aria-pressed="${Boolean(s.enabled)}"></button>`}
         ${sourceAction}
       </div>`;
-    const toggle = row.querySelector('.switch');
+    const aiToggle = row.querySelector('.source-ai-switch');
+    if (aiToggle) aiToggle.onclick = async (ev) => {
+      ev.stopPropagation();
+      const enabled = !s.autoRewriteEnabled;
+      const result = await api(`/api/admin/sources/${encodeURIComponent(s.id)}/auto-rewrite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      s.autoRewriteEnabled = result.autoRewriteEnabled;
+      toast(`${s.name} 后台 AI 自动处理已${result.autoRewriteEnabled ? '开启' : '关闭'}`);
+      await Promise.all([loadSources(), loadAdminSources()]);
+      renderManage(target, statusTarget);
+    };
+    const toggle = row.querySelector('.source-enabled-switch');
     if (toggle) toggle.onclick = async (ev) => {
         ev.stopPropagation();
         const r = await api(`/api/sources/${s.id}/toggle`, { method: 'POST' });

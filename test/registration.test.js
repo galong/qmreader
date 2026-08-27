@@ -59,8 +59,11 @@ test('self-hosted instances can disable public registration', { timeout: 15000 }
     assert.equal(registerResponse.status, 403);
     assert.match((await registerResponse.json()).error, /未开放注册/);
   } finally {
-    child.kill('SIGTERM');
-    await new Promise(resolve => child.once('exit', resolve));
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise(resolve => child.once('exit', resolve));
+      child.kill('SIGTERM');
+      await exited;
+    }
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
 });

@@ -104,7 +104,9 @@ HOST=127.0.0.1 PORT=3000 npm start
 | `DEEPSEEK_API_KEY` | 空 | 服务端 DeepSeek API key，用于标题翻译和默认改写 |
 | `DEEPSEEK_MODEL` | `deepseek-v4-flash` | 服务端默认标题翻译和中文改写模型 |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | DeepSeek OpenAI-compatible API 地址 |
-| `AI_PROVIDER` | `deepseek` | 备用服务端 provider 名称 |
+| `AI_PROVIDER` | `deepseek` | 服务端 provider ID；自定义 OpenAI 兼容服务可设为 `custom` |
+| `AI_PROVIDER_NAME` | 空 | 自定义服务的显示名称 |
+| `AI_PROVIDER_TYPE` | `openai_compatible` | API 协议；支持 `openai_compatible` 或 `anthropic_compatible` |
 | `AI_API_KEY` | 空 | 非 DeepSeek provider 的服务端 key |
 | `AI_BASE_URL` | 空 | 非 DeepSeek provider 的 OpenAI/Anthropic-compatible base URL |
 | `AI_MODEL` | 空 | 非 DeepSeek provider 的模型名 |
@@ -125,10 +127,15 @@ HOST=127.0.0.1 PORT=3000 npm start
 | `SOURCE_INTERACTION_REFRESH_COOLDOWN_MS` | `300000` | 打开文章或切换频道触发后台刷新时的同源冷却时间 |
 | `FETCH_SOURCE_CONCURRENCY` | `6` | 批量刷新时并发抓取的信息源数量，范围 1–8 |
 | `TITLE_TRANSLATION_LIMIT` | `80` | 单轮标题翻译上限 |
-| `AUTO_REWRITE_SOURCE_IDS` | 空 | 限定自动改写源；空值表示启用源中可改写的内容 |
+| `AUTO_REWRITE_SOURCE_IDS` | 空 | 自动处理源的部署默认值；后台逐源开关会作为持久化覆盖值 |
 | `AUTO_REWRITE_LIMIT_PER_SOURCE` | `3` | 每个源默认自动改写条数 |
 | `AUTO_REWRITE_LIMIT_HACKERNEWS` | `10` | Hacker News 自动改写条数 |
-| `AUTO_REWRITE_MODEL` | `deepseek-v4-flash` | 自动改写模型 |
+| `AUTO_REWRITE_MODEL` | `deepseek-v4-flash` | 自动改写模型；使用自定义 provider 时应与 `AI_MODEL` 一致 |
+| `AUTO_REWRITE_TIME_ZONE` | `Asia/Shanghai` | 自动处理时间窗采用的 IANA 时区 |
+| `AUTO_REWRITE_WINDOW_START_HOUR` | `0` | 自动处理开始小时（含） |
+| `AUTO_REWRITE_WINDOW_END_HOUR` | `7` | 自动处理结束小时（不含） |
+| `AUTO_REWRITE_SCHEDULE_INTERVAL_MS` | `60000` | 检查是否进入自动处理时间窗的间隔 |
+| `AUTO_REWRITE_SCHEDULE_STARTUP_DELAY_MS` | `10000` | 服务启动后首次检查自动处理时间窗的延迟 |
 | `UMAMI_WEBSITE_ID` | 空 | 可选 Umami 站点 ID |
 | `UMAMI_SRC` | `https://umami.qiaomu.ai/script.js` | 可选 Umami 脚本地址 |
 
@@ -390,11 +397,14 @@ Important variables:
 
 - `DEEPSEEK_API_KEY`: server-side key for title translation and default rewriting.
 - `DEEPSEEK_MODEL`: default `deepseek-v4-flash`.
+- `AI_PROVIDER` / `AI_PROVIDER_TYPE` / `AI_BASE_URL` / `AI_MODEL`: custom OpenAI- or Anthropic-compatible server AI.
+- `AI_API_KEY`: server-side key for a non-DeepSeek provider.
 - `ADMIN_EMAIL` / `ADMIN_PASSWORD`: admin account seed.
 - `HOST` / `PORT`: HTTP bind address and port.
 - `STARTUP_REFRESH_DELAY_MS`: startup refresh delay, or `-1` to disable.
 - `FRESHNESS_SWEEP_INTERVAL_MS`: stale-source sweep interval.
-- `AUTO_REWRITE_SOURCE_IDS`: optional source allowlist for auto rewriting.
+- `AUTO_REWRITE_SOURCE_IDS`: deployment defaults for per-source automatic rewriting; admin toggles persist overrides.
+- `AUTO_REWRITE_TIME_ZONE` / `AUTO_REWRITE_WINDOW_START_HOUR` / `AUTO_REWRITE_WINDOW_END_HOUR`: automatic AI processing window.
 
 Runtime data is stored under `data/` and is ignored by Git.
 
