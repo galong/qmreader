@@ -25,6 +25,7 @@ const NEWS_REFRESH_INTERVAL_MS = parseInt(process.env.NEWS_REFRESH_INTERVAL_MS |
 const ARTICLE_REFRESH_INTERVAL_MS = parseInt(process.env.ARTICLE_REFRESH_INTERVAL_MS || `${2 * HOUR_MS}`, 10);
 const PODCAST_REFRESH_INTERVAL_MS = parseInt(process.env.PODCAST_REFRESH_INTERVAL_MS || `${6 * HOUR_MS}`, 10);
 const TITLE_TRANSLATION_LIMIT = parseInt(process.env.TITLE_TRANSLATION_LIMIT || '80', 10);
+const ALLOW_REGISTRATION = String(process.env.ALLOW_REGISTRATION || '1').trim() !== '0';
 const AUTO_REWRITE_SOURCE_IDS = new Set(String(process.env.AUTO_REWRITE_SOURCE_IDS || '')
   .split(',')
   .map(id => id.trim())
@@ -2682,6 +2683,33 @@ app.get('/api/sources', (req, res) => {
   });
 });
 
+app.get('/api/admin/sources', requireAdmin, (req, res) => {
+  res.json({ sources: fetcher.getSourcesMeta({ includeHidden: true }) });
+});
+
+app.post('/api/admin/sources/remove-disabled', requireAdmin, (req, res) => {
+  const ids = fetcher.hideDisabledSources();
+  fetcher.flushDisk();
+  res.json({ ids, removed: ids.length });
+});
+
+app.delete('/api/admin/sources/:id', requireAdmin, (req, res) => {
+  const src = fetcher.getSourceById(req.params.id);
+  if (!src) return res.status(404).json({ error: 'source not found' });
+  if (src.id === 'user-submitted') return res.status(400).json({ error: '读者提交源不能移除' });
+  fetcher.setHidden(src.id, true);
+  fetcher.flushDisk();
+  res.json({ id: src.id, hidden: true });
+});
+
+app.post('/api/admin/sources/:id/restore', requireAdmin, (req, res) => {
+  const src = fetcher.getSourceById(req.params.id);
+  if (!src) return res.status(404).json({ error: 'source not found' });
+  fetcher.setHidden(src.id, false);
+  fetcher.flushDisk();
+  res.json({ id: src.id, hidden: false, enabled: fetcher.isEnabled(src) });
+});
+
 app.post('/api/sources/:id/refresh-hint', (req, res) => {
   try {
     const refresh = triggerSourceInteractionRefresh(req.params.id, 'source-interaction');
@@ -2692,7 +2720,10 @@ app.post('/api/sources/:id/refresh-hint', (req, res) => {
 });
 
 app.get('/api/me', (req, res) => {
-  res.json({ user: req.user || null });
+  res.json({
+    user: req.user || null,
+    capabilities: { registration: ALLOW_REGISTRATION },
+  });
 });
 
 app.patch('/api/me/profile', requireLogin, (req, res) => {
@@ -2737,6 +2768,9 @@ app.post('/api/me/notifications/read', requireLogin, (req, res) => {
 });
 
 app.post('/api/auth/register', registerRateLimit, (req, res) => {
+  if (!ALLOW_REGISTRATION) {
+    return res.status(403).json({ error: '此站点未开放注册' });
+  }
   try {
     const user = store.createUser({
       email: req.body && req.body.email,
@@ -3471,6 +3505,7 @@ app.post('/api/refresh', requireLogin, async (req, res) => {
   if (sourceId) {
     const src = fetcher.getSourceById(sourceId);
     if (!src) return res.status(404).json({ error: 'source not found' });
+    if (fetcher.isHidden(src)) return res.status(410).json({ error: '这个信息源已移除' });
     if (!fetcher.isEnabled(src) && req.user.role !== 'admin') {
       return res.status(403).json({ error: '这个信息源暂未启用' });
     }
