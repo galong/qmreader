@@ -128,12 +128,13 @@ HOST=127.0.0.1 PORT=3000 npm start
 | `FETCH_SOURCE_CONCURRENCY` | `6` | 批量刷新时并发抓取的信息源数量，范围 1–8 |
 | `TITLE_TRANSLATION_LIMIT` | `80` | 单轮标题翻译上限 |
 | `AUTO_REWRITE_SOURCE_IDS` | 空 | 自动处理源的部署默认值；后台逐源开关会作为持久化覆盖值 |
+| `AUTO_REWRITE_CONTENT_ENABLED` | `1` | 是否后台自动生成正文改写；设为 `0` 时只自动翻译标题，正文由读者手工生成 |
 | `AUTO_REWRITE_LIMIT_PER_SOURCE` | `3` | 每个源默认自动改写条数 |
 | `AUTO_REWRITE_LIMIT_HACKERNEWS` | `10` | Hacker News 自动改写条数 |
 | `AUTO_REWRITE_MODEL` | `deepseek-v4-flash` | 自动改写模型；使用自定义 provider 时应与 `AI_MODEL` 一致 |
 | `AUTO_REWRITE_TIME_ZONE` | `Asia/Shanghai` | 自动处理时间窗采用的 IANA 时区 |
-| `AUTO_REWRITE_WINDOW_START_HOUR` | `0` | 自动处理开始小时（含） |
-| `AUTO_REWRITE_WINDOW_END_HOUR` | `7` | 自动处理结束小时（不含） |
+| `AUTO_REWRITE_WINDOW_START_HOUR` | `0` | 自动处理开始小时（含）；与结束小时相同时表示全天运行 |
+| `AUTO_REWRITE_WINDOW_END_HOUR` | `7` | 自动处理结束小时（不含）；与开始小时相同时表示全天运行 |
 | `AUTO_REWRITE_SCHEDULE_INTERVAL_MS` | `60000` | 检查是否进入自动处理时间窗的间隔 |
 | `AUTO_REWRITE_SCHEDULE_STARTUP_DELAY_MS` | `10000` | 服务启动后首次检查自动处理时间窗的延迟 |
 | `UMAMI_WEBSITE_ID` | 空 | 可选 Umami 站点 ID |
@@ -164,7 +165,7 @@ HOST=127.0.0.1 PORT=3000 npm start
 QMReader 的刷新分两段：
 
 1. **Fetch worker:** 抓 RSS/页面，写入缓存和 SQLite，并立刻通知 Web 进程重新加载。用户先看到新条目。
-2. **AI worker:** 只对有新条目的源排队做标题翻译和自动改写。AI 慢或失败时，不阻塞 RSS 阅读。
+2. **AI worker:** 只对有新条目的源排队做标题翻译；`AUTO_REWRITE_CONTENT_ENABLED=1` 时才继续自动改写正文。AI 慢或失败时，不阻塞 RSS 阅读。
 
 不同源有不同 freshness 策略。例如 Hacker News 5 分钟高优先级，Product Hunt 15 分钟，GitHub/Hugging Face 30 分钟，播客类 12 小时。`/api/sources` 会返回 `backgroundJob.fetch` 和 `backgroundJob.ai`，便于观察两段任务状态。
 
