@@ -121,6 +121,7 @@ const DEFAULT_AGENT_PROMPTS = AI_READING_TASKS
 const AGENT_PROMPT_LIMIT = 24;
 const PERSONA_AGENT_VERSION = 'persona-qmreader-v1';
 const ENTRY_RENDER_BATCH_SIZE = 100;
+const ENTRY_LIST_PAGE_SIZE = 60;
 const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const LUCIDE_DEFAULT_ATTRS = {
   xmlns: 'http://www.w3.org/2000/svg',
@@ -612,6 +613,10 @@ const state = {
   adminSources: [],
   entries: [],
   entryRenderLimit: ENTRY_RENDER_BATCH_SIZE,
+  entryListScope: '',
+  entryListLimit: ENTRY_LIST_PAGE_SIZE,
+  entryListHasMore: false,
+  entriesLoadingMore: false,
   contributors: [],
   adminSubmissionUsers: [],
   adminSubmissionRequests: [],
@@ -1716,14 +1721,79 @@ function pollHintedSourceRefresh(sourceId) {
   sourceRefreshPolls.set(id, task);
 }
 
-async function loadEntries() {
+const ENTRY_LIST_FIXED_VIEWS = ['history', 'starred', 'assets'];
+let entriesRequestSeq = 0;
+let entriesAbortController = null;
+let listReloadSeq = 0;
+
+function entryListWindowed() {
+  return !ENTRY_LIST_FIXED_VIEWS.includes(state.view);
+}
+
+function entryListScopeKey() {
+  return [state.view, state.filterSource || '', state.filterCategory || '', state.q || ''].join('|');
+}
+
+async function loadEntries({ growWindow = false, fullWindow = false } = {}) {
+  const scopeKey = entryListScopeKey();
+  if (scopeKey !== state.entryListScope) {
+    state.entryListScope = scopeKey;
+    state.entryListLimit = ENTRY_LIST_PAGE_SIZE;
+  } else if (growWindow && entryListWindowed()) {
+    state.entryListLimit += ENTRY_LIST_PAGE_SIZE;
+  }
   const p = new URLSearchParams();
   if (state.filterSource) p.set('source', state.filterSource);
   if (state.filterCategory) p.set('category', state.filterCategory);
   if (state.q && state.view !== 'assets' && state.view !== 'contributors') p.set('q', state.q);
-  const data = await api('/api/entries?' + p.toString());
+  const limit = entryListWindowed() && !fullWindow ? state.entryListLimit : 400;
+  p.set('limit', String(limit));
+  if (entriesAbortController) entriesAbortController.abort();
+  const controller = new AbortController();
+  entriesAbortController = controller;
+  const seq = ++entriesRequestSeq;
+  let data;
+  try {
+    data = await api('/api/entries?' + p.toString(), { signal: controller.signal });
+  } catch (err) {
+    if (err && err.name === 'AbortError') return false;
+    throw err;
+  }
+  if (seq !== entriesRequestSeq) return false;
   state.entries = data.entries;
   state.entryRenderLimit = ENTRY_RENDER_BATCH_SIZE;
+  state.entryListHasMore = entryListWindowed() && !fullWindow && Array.isArray(data.entries) && data.entries.length >= limit;
+  return true;
+}
+
+function setEntryListUpdating(updating) {
+  const el = $('#entry-list');
+  if (!el) return;
+  el.classList.toggle('entry-list-updating', Boolean(updating));
+  el.setAttribute('aria-busy', updating ? 'true' : 'false');
+}
+
+async function loadMoreEntries() {
+  if (state.entriesLoadingMore || !state.entryListHasMore) return;
+  state.entriesLoadingMore = true;
+  const el = $('#entry-list');
+  const scrollTop = el ? el.scrollTop : 0;
+  renderList();
+  let loaded = false;
+  try {
+    loaded = (await loadEntries({ growWindow: true })) !== false;
+  } catch (err) {
+    state.entriesLoadingMore = false;
+    renderList();
+    toast('加载更早文章失败：' + err.message, 4000);
+    return;
+  }
+  state.entriesLoadingMore = false;
+  if (!loaded) return;
+  state.entryRenderLimit = state.entries.length;
+  renderList();
+  renderSidebar();
+  if (el) requestAnimationFrame(() => { el.scrollTop = scrollTop; });
 }
 async function loadContributors() {
   const p = new URLSearchParams({ limit: '200' });
@@ -1977,6 +2047,12 @@ function unreadCountFor(pred) {
   return state.entries.filter(e => pred(e) && !state.read.has(e.id)).length;
 }
 
+function entryWindowCountLabel(count) {
+  const value = Number(count) || 0;
+  if (!value) return '';
+  return state.entryListHasMore ? `${value}+` : String(value);
+}
+
 function renderSidebar() {
   const groups = { article: [], news: [], podcast: [] };
   for (const s of state.sources) if (s.enabled) groups[s.category]?.push(s);
@@ -2006,9 +2082,9 @@ function renderSidebar() {
     }
   }
 
-  $('#count-all').textContent = state.entries.length || '';
-  $('#count-hot').textContent = hotEntryCount() || '';
-  $('#count-unread').textContent = unreadCountFor(() => true) || '';
+  $('#count-all').textContent = entryWindowCountLabel(state.entries.length);
+  $('#count-hot').textContent = entryWindowCountLabel(hotEntryCount());
+  $('#count-unread').textContent = entryWindowCountLabel(unreadCountFor(() => true));
   $('#count-starred').textContent = state.starred.size || '';
   $('#count-history').textContent = state.history.size || '';
   $('#count-contributors').textContent = state.contributors.length || '';
@@ -3633,6 +3709,15 @@ function renderList() {
       });
     };
     frag.appendChild(more);
+  } else if (state.entryListHasMore) {
+    const earlier = document.createElement('button');
+    earlier.type = 'button';
+    earlier.className = 'list-load-more list-load-earlier';
+    earlier.disabled = state.entriesLoadingMore;
+    earlier.textContent = state.entriesLoadingMore ? '正在加载…' : '加载更早文章';
+    earlier.setAttribute('aria-label', state.entriesLoadingMore ? '正在加载更早文章' : '加载更早文章');
+    earlier.onclick = () => { void loadMoreEntries(); };
+    frag.appendChild(earlier);
   }
   el.appendChild(frag);
 }
@@ -7679,6 +7764,8 @@ async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentI
     state.activeAnnotationId = '';
   }
   state.activeEntry = e;
+  let content = e.content || contentCache.get(e.id);
+  const contentRequest = content ? null : api(`/api/entry/${e.id}`);
   const requestedFocus = ASSET_FILTER_TYPES.includes(focus) ? focus : null;
   const requestedAssetId = (requestedFocus === 'translation' || requestedFocus === 'rewrite')
     ? String(aiAssetId || '').trim()
@@ -7761,12 +7848,11 @@ async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentI
 
   renderEntryStateUi();
 
-  // content is loaded lazily — the list API omits it to stay lightweight
-  let content = e.content || contentCache.get(e.id);
-  if (!content) {
+  // Start this request before auxiliary assets so HTTP/1.1 connections prioritize readable content.
+  if (contentRequest) {
     $('#reader-content').innerHTML = '<p style="color:var(--text-2)">加载内容中…</p>';
     try {
-      const data = await api(`/api/entry/${e.id}`);
+      const data = await contentRequest;
       if (data.entry && state.activeEntry?.id === e.id) {
         state.activeEntry = { ...state.activeEntry, ...data.entry };
       }
@@ -7904,8 +7990,9 @@ async function openEntryFromUrl({ reuseLoadedCollections = false } = {}) {
       state.q = '';
     }
     if (!reuseLoadedCollections) {
-      await Promise.all([loadEntries(), loadContributors()]);
-    } else if (route.contributorSort !== 'latest') {
+      if (route.view === 'contributors') await loadContributors();
+      else await loadEntries();
+    } else if (route.view === 'contributors' && !state.contributors.length) {
       await loadContributors();
     }
     updateListTitle();
@@ -7927,7 +8014,15 @@ async function openEntryFromUrl({ reuseLoadedCollections = false } = {}) {
 
 /* ---------- Navigation ---------- */
 async function reload({ keepReader = false, clearUrl = true } = {}) {
-  await Promise.all([loadEntries(), loadContributors()]);
+  const listUpdating = state.view !== 'contributors';
+  const reloadSeq = listUpdating ? ++listReloadSeq : 0;
+  if (listUpdating) setEntryListUpdating(true);
+  try {
+    if (state.view === 'contributors') await loadContributors();
+    else await loadEntries();
+  } finally {
+    if (listUpdating && reloadSeq === listReloadSeq) setEntryListUpdating(false);
+  }
   updateListTitle();
   renderList();
   renderSidebar();
@@ -7974,7 +8069,12 @@ function selectSource(id) {
   state.readerFocus = null;
   state.readerAssetId = '';
   if (nextSource) hintSourceRefresh(nextSource, 'source-select');
-  reload();
+  updateListTitle();
+  renderSidebar();
+  void reload().catch(error => {
+    toast('频道加载失败，请稍后重试：' + error.message, 5000);
+    renderList();
+  });
 }
 function selectCategory(cat) {
   state.view = 'all';
@@ -7985,7 +8085,12 @@ function selectCategory(cat) {
   state.contributorSort = 'latest';
   state.readerFocus = null;
   state.readerAssetId = '';
-  reload();
+  updateListTitle();
+  renderSidebar();
+  void reload().catch(error => {
+    toast('分类加载失败，请稍后重试：' + error.message, 5000);
+    renderList();
+  });
 }
 function selectView(v) {
   state.view = v;
@@ -7998,10 +8103,16 @@ function selectView(v) {
   if (v !== 'contributors') state.contributorSort = 'latest';
   if (v === 'assets' || v === 'contributors') {
     syncListUrl();
-    reload({ clearUrl: false });
+    void reload({ clearUrl: false }).catch(error => {
+      toast('列表加载失败，请稍后重试：' + error.message, 5000);
+      renderList();
+    });
     return;
   }
-  reload();
+  void reload().catch(error => {
+    toast('文章列表加载失败，请稍后重试：' + error.message, 5000);
+    renderList();
+  });
 }
 
 function goHomeAll() {
@@ -10358,22 +10469,27 @@ $('#reader-pane').addEventListener('scroll', hideArticleLinkMenu, { passive: tru
   setContextPanel(state.contextPanel, { persist: false, expand: false });
   $('#entry-list').innerHTML = '<div class="list-empty">正在加载订阅内容…</div>';
   try {
+    const route = routeStateFromUrl();
+    if (route.view === 'contributors') state.contributorSort = route.contributorSort;
+    const collectionTask = route.view === 'contributors'
+      ? loadContributors()
+      : loadEntries({ fullWindow: ENTRY_LIST_FIXED_VIEWS.includes(route.view) });
     const [, data] = await Promise.all([
       loadMe(),
       loadSources(),
-      loadEntries(),
-      loadContributors(),
+      collectionTask,
     ]);
     await openEntryFromUrl({ reuseLoadedCollections: true });
     // first boot: server may still be fetching — poll a few times
-    if (data.refreshing || state.entries.length === 0) {
+    if (data.refreshing || (route.view !== 'contributors' && state.entries.length === 0)) {
       for (let i = 0; i < 40; i++) {
         await new Promise(r => setTimeout(r, 2000));
         const d = await loadSources();
         if (!d.refreshing && state.entries.length) break;
         if (!d.refreshing) break;
       }
-      await Promise.all([loadEntries(), loadContributors()]);
+      if (state.view === 'contributors') await loadContributors();
+      else await loadEntries();
       updateListTitle(); renderList(); renderSidebar();
     }
   } catch (e) {

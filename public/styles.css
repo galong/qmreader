@@ -1171,6 +1171,11 @@ button:disabled { cursor: not-allowed; opacity: 0.62; }
   border-color: var(--text-2);
   background: var(--bg-2);
 }
+.entry-list { transition: opacity 140ms ease; }
+.entry-list.entry-list-updating { opacity: 0.55; }
+@media (prefers-reduced-motion: reduce) {
+  .entry-list { transition: none; }
+}
 .entry-card:hover { background: var(--bg-1); }
 .entry-card.active { background: var(--bg-1); border-color: var(--border); box-shadow: 0 2px 8px var(--shadow); }
 .entry-main { flex: 1; min-width: 0; }

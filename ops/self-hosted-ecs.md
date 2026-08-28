@@ -50,6 +50,7 @@ docker compose logs --tail=100 -f qmreader
 ```
 
 Compose 会把应用限制在 `127.0.0.1:3088`，由 Nginx 转发到公网 80/443。
+生产反向代理可参考 `ops/nginx/qmreader.conf.example`：对 HTTPS 启用 HTTP/2，普通页面和 JSON 使用默认代理缓冲，仅对文章对话的 SSE 流式接口关闭缓冲。
 
 ## 2. 冒烟检查
 
