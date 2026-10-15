@@ -11157,7 +11157,7 @@ window.addEventListener('popstate', () => { mobileReaderFromList = false; });
         if (state.entries.length) renderList();
         return value;
       }).catch(() => { toast('频道信息暂未同步，文章仍可阅读', 4000); return { refreshing: false }; });
-      await loadEntries({ summary: route.view === 'assets' ? 'full' : 'minimal' });
+      await loadEntries({ summary: route.view === 'assets' ? 'full' : route.view === 'hot' ? 'compact' : 'minimal' });
       updateListTitle(); renderList();
       // Catalog is supplementary; never gate first-paint on it.
       void catalogTask;

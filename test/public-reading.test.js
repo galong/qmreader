@@ -33,13 +33,15 @@ test('real public HTTP serves first list, anonymous article and distinct minimal
   assert.ok(bootstrap.entries.every(entry => !['public-1', 'opt-in-secret'].includes(entry.id)));
   assert.equal('content' in bootstrap.entries[0], false);
   assert.ok(!response.headers.has('set-cookie'));
-  const [full, minimal, compact] = await Promise.all([
+  const [full, minimal, compact, webHot] = await Promise.all([
     fetch(base + '/api/entries?limit=40').then(r => r.json()),
     fetch(base + '/api/entries?limit=40&summary=minimal').then(r => r.json()),
     fetch(base + '/api/entries?limit=40', { headers: { 'X-Rss-List': 'reader-v1' } }).then(r => r.json()),
+    fetch(base + '/api/entries?limit=40&summary=compact').then(r => r.json()),
   ]);
   assert.equal(full.entries.length, 40);
   assert.ok(full.entries[0].stats);
+  assert.ok(webHot.entries[0].stats, 'popular view keeps ranking stats');
   assert.equal(minimal.entries[0].stats, null);
   assert.ok(minimal.entries[0].assets, 'web retains readiness indicators');
   assert.equal(compact.entries[0].assets, undefined);
