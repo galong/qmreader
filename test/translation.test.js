@@ -32,6 +32,17 @@ function openAiResponse(content, finishReason = 'stop', headers = {}) {
   }), { status: 200, headers: { 'content-type': 'application/json', ...headers } });
 }
 
+test('server-funded completion refuses a body model override before network access', async t => {
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => { calls++; return openAiResponse('OK'); });
+  await assert.rejects(() => deepseek.__test.postChatCompletion(providerConfig({
+    provider: 'deepseek', usesServerDeepSeekKey: true,
+    baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash',
+  }), { model: 'deepseek-v4-pro', messages: [{ role: 'user', content: 'hello' }] }),
+  error => error.code === 'AI_MODEL_FORBIDDEN');
+  assert.equal(calls, 0);
+});
+
 test('structured translation extracts and chunks every paragraph without the old 28-block cap', () => {
   const html = Array.from({ length: 35 }, (_, index) => `<p>Paragraph ${index} contains enough English text to translate completely.</p>`).join('');
   const blocks = deepseek.__test.htmlToTranslationBlocks(html, '');

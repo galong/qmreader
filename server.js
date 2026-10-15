@@ -8,6 +8,7 @@ const fetcher = require('./lib/fetcher');
 const { createWechatImageService } = require('./lib/wechat-images');
 const deepseek = require('./lib/deepseek');
 const { requestAiConfig } = require('./lib/request-ai-config');
+const { runWithAiActor } = require('./lib/ai-spend-guard');
 const store = require('./lib/store');
 const { mountPodcastNotes } = require('./lib/podcast-notes');
 const { mountYoutubeNotes } = require('./lib/youtube-notes');
@@ -91,7 +92,7 @@ const ASSET_DIRECTORY_META = {
   },
 };
 
-app.set('trust proxy', 1);
+app.set('trust proxy', 'loopback');
 app.use(compression());
 app.use(express.json({ limit: '2mb' }));
 app.use((req, res, next) => {
@@ -142,6 +143,7 @@ app.use((req, res, next) => {
 });
 
 let refreshing = false;
+app.use((req, res, next) => runWithAiActor(req.user ? `user:${req.user.id}` : 'anonymous', next));
 let refreshProgress = { done: 0, total: 0 };
 let refreshWorker = null;
 let refreshJob = null;
@@ -2079,6 +2081,7 @@ function clearSessionCookie(req, res) {
 
 function sendError(res, error, fallback = 'request failed') {
   const status = error.statusCode || 500;
+  if (error.retryAfter) res.setHeader('Retry-After', String(error.retryAfter));
   res.status(status).json({ error: error.message || fallback });
 }
 
