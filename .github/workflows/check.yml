@@ -1,0 +1,17 @@
+name: Check
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.0'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: node --test .rss-reliability/reliability.check.cjs
+      - run: python3 scripts/test_apply_release.py
+      - run: python3 -m unittest discover -s .rss-reliability -p 'test_*.py'
+      - run: npm audit --omit=dev

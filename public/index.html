@@ -2,12 +2,15 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f7f7f6" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)" />
+  <meta name="color-scheme" content="light dark" />
   <title>QMReader · RSS 阅读器</title>
   <link rel="alternate" type="application/rss+xml" title="QMReader 公开资产 RSS" href="https://rss.qiaomu.ai/assets.xml" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="shortcut icon" href="/favicon.svg" />
-  <link rel="stylesheet" href="/styles.css?v=159" />
+  <link rel="stylesheet" href="/styles.css?v=20261015-recovery3" />
   <meta name="description" content="围绕 RSS 文章沉淀中文翻译、乔木风格重写、人工点评和文章对话的公开阅读站。" />
   <link rel="canonical" href="https://rss.qiaomu.ai/" />
   <meta property="og:site_name" content="QMReader" />
@@ -37,6 +40,7 @@
       }, 2000);
     }, { once: true });
   </script>
+  <link rel="stylesheet" href="/web-collection.css?v=1.0.0">
 </head>
 <body data-theme="light">
   <div id="app">
@@ -97,13 +101,17 @@
       </div>
 
       <div class="sidebar-scroll" id="feed-groups"><!-- groups injected --></div>
+      <div id="ps-show-list" class="sidebar-scroll ps-show-list hidden" aria-label="播客节目">
+        <div class="ps-show-heading">精选播客 · AI 与商业</div>
+        <div id="ps-shows"></div>
+      </div>
 
       <div class="account-strip">
-        <button id="auth-open" class="account-card" type="button">
+        <button id="auth-open" class="account-card" type="button" disabled aria-busy="true">
           <span class="account-avatar" id="guest-avatar">Q</span>
           <span class="account-text">
             <strong>登录 / 注册</strong>
-            <span>同步阅读与贡献</span>
+            <span>无需登录即可阅读</span>
           </span>
         </button>
         <button id="account-info" class="account-card account-info hidden" type="button"></button>
@@ -132,8 +140,8 @@
         <div class="pane-actions">
           <button id="source-refresh-btn" class="icon-btn source-refresh-btn hidden" type="button" title="检查当前信息源更新" aria-label="检查当前信息源更新"><span data-qm-icon="refresh-cw"></span></button>
           <span id="source-refresh-status" class="source-refresh-status hidden" role="status" aria-live="polite"></span>
-          <input id="search" type="search" placeholder="搜索文章…" />
-          <button id="mark-read-btn" class="icon-btn" title="全部标为已读" aria-label="全部标为已读"><span data-qm-icon="check-check"></span></button>
+          <input id="search" type="search" placeholder="搜索文章…" aria-label="搜索文章" />
+          <button id="mark-read-btn" class="icon-btn mark-read-labeled" title="把当前列表全部标为已读" aria-label="全部标为已读"><span data-qm-icon="check-check"></span><span class="button-label">全部已读</span></button>
         </div>
       </header>
       <div id="list-scope-bar" class="list-scope-bar" role="tablist" aria-label="文章列表模式">
@@ -146,7 +154,24 @@
         <button class="entry-pane-tab" type="button" data-home-tab="assets">公开资产动态 <span id="home-asset-count">0</span></button>
       </div>
       <div id="asset-activity-strip" class="asset-activity-strip hidden"></div>
-      <div id="entry-list" class="entry-list"></div>
+      <div id="entry-list" class="entry-list"><div class="qm-skeleton" role="status" aria-label="正在加载文章"><div class="qm-skeleton-row" aria-hidden="true"><i></i><b></b><b></b><b></b></div><div class="qm-skeleton-row" aria-hidden="true"><i></i><b></b><b></b><b></b></div><div class="qm-skeleton-row" aria-hidden="true"><i></i><b></b><b></b><b></b></div><div class="qm-skeleton-row" aria-hidden="true"><i></i><b></b><b></b><b></b></div><div class="qm-skeleton-row" aria-hidden="true"><i></i><b></b><b></b><b></b></div><div class="qm-skeleton-row" aria-hidden="true"><i></i><b></b><b></b><b></b></div></div></div>
+      <div id="ps-entry-view" class="ps-entry-view hidden">
+        <header class="pane-header">
+          <div class="pane-title" id="ps-list-title">播客单集</div><span id="ps-count" class="ps-count"></span>
+        </header>
+        <form id="ps-search-form" class="ps-search-form" role="search">
+          <label class="sr-only" for="ps-query">搜索播客或单集</label>
+          <input id="ps-query" type="search" maxlength="200" autocomplete="off" placeholder="搜索播客或单集…" />
+          <button class="icon-btn" type="submit" title="搜索播客" aria-label="搜索播客"><span data-qm-icon="search"></span></button>
+        </form>
+        <p id="ps-status" class="ps-status" role="status" aria-live="polite"></p>
+        <div id="ps-episode-list" class="entry-list ps-episode-list">
+          <div id="ps-empty" class="list-empty">选择左侧节目查看单集。</div>
+          <div id="ps-podcasts"></div>
+          <div id="ps-episodes"></div>
+          <button id="ps-more" class="ghost-btn hidden" type="button">加载更多单集</button>
+        </div>
+      </div>
     </section>
 
     <div id="list-resizer" class="pane-resizer" role="separator" aria-orientation="vertical" aria-label="调整文章列表宽度" tabindex="0"></div>
@@ -156,9 +181,42 @@
 
     <!-- ===== Reader ===== -->
     <section id="reader-pane">
+      <div id="ps-reader-view" class="ps-reader-view hidden" aria-label="播客文稿阅读区">
+        <button id="ps-back" class="ghost-btn ps-back hidden" type="button"><span data-qm-icon="arrow-left" aria-hidden="true"></span>返回单集</button>
+        <div id="ps-reading-empty" class="reader-empty">选择中间列表中的单集，阅读源文稿。</div>
+        <article id="ps-article" class="reader hidden">
+          <header class="reader-head">
+            <div class="reader-source" id="ps-show-name"></div>
+            <h1 id="ps-title"></h1>
+            <div class="ps-meta"><span id="ps-word-count"></span><a id="ps-source-link" target="_blank" rel="noopener noreferrer">查看原始页面</a></div>
+          </header>
+          <div class="ps-tabs" role="tablist" aria-label="文稿类型">
+            <button id="ps-tab-source" class="active" role="tab" aria-selected="true" aria-controls="ps-source-panel" type="button">源文稿</button>
+            <button id="ps-tab-rewrite" role="tab" aria-selected="false" aria-controls="ps-rewrite-panel" type="button">乔木转写</button>
+          </div>
+          <section id="ps-source-panel" role="tabpanel" aria-labelledby="ps-tab-source">
+            <p class="ps-note">以下为上游提供的源文稿，可能存在识别错误。</p>
+            <div id="ps-source-text" class="ps-transcript"></div>
+          </section>
+          <section id="ps-rewrite-panel" role="tabpanel" aria-labelledby="ps-tab-rewrite" class="hidden">
+            <p class="ps-note">乔木转写是基于源文稿的中文提炼，不是逐字翻译。请核对原文中的人名、数字与观点。</p>
+            <button id="ps-rewrite" class="ghost-btn primary" type="button">生成乔木转写</button>
+            <div id="ps-rewrite-text" class="ps-transcript"></div>
+          </section>
+        </article>
+        <p class="ps-credit">源文稿来自播客原文服务。</p>
+      </div>
       <div id="reader-empty" class="reader-empty">
         <div class="empty-logo">Q</div>
-        <p>选择一篇文章开始阅读</p>
+        <p class="reader-empty-title">选择一篇文章开始阅读</p>
+        <p class="reader-empty-hint">在左侧选来源，再从中间列表点开任意一篇，正文会在这里排成书页。</p>
+        <ul class="reader-empty-keys" aria-label="键盘快捷键">
+          <li><span><kbd>J</kbd><kbd>K</kbd></span>下一篇 / 上一篇</li>
+          <li><span><kbd>S</kbd></span>收藏</li>
+          <li><span><kbd>A</kbd></span>问 AI 伴读</li>
+          <li><span><kbd>I</kbd></span>沉浸阅读</li>
+          <li><span><kbd>Esc</kbd></span>退出</li>
+        </ul>
       </div>
       <article id="reader" class="reader hidden">
         <nav id="reader-signal-rail" class="reader-signal-rail" aria-label="文章反馈">
@@ -203,11 +261,12 @@
           <div id="reader-asset-summary" class="reader-asset-summary hidden"></div>
           <div class="reader-toolbar">
             <div class="reader-toolbar-main">
-              <button id="reader-copy-link" class="ghost-btn reader-toolbar-icon" type="button" title="复制文章内容" aria-label="复制文章内容"><span data-qm-icon="file-text"></span><span class="button-label">复制文章内容</span></button>
-              <button id="reader-star" class="reader-action-pill" type="button" aria-label="收藏这篇文章"></button>
+              <a id="reader-open-original" class="ghost-btn reader-toolbar-icon reader-open-original hidden" target="_blank" rel="noopener" title="在新标签页打开原网页" aria-label="打开原网页"><span data-qm-icon="external-link"></span><span class="button-label">原网页</span></a>
+              <button id="reader-star" class="reader-action-pill" type="button" aria-label="收藏这篇文章" title="收藏（S）"></button>
               <button id="reader-like" class="reader-action-pill" type="button" aria-label="点赞这篇文章"></button>
-              <button id="reader-prefs-toggle" class="ghost-btn reader-prefs-toggle reader-toolbar-icon" type="button" title="字体设置" aria-label="字体设置" aria-expanded="false"><span data-qm-icon="sliders-horizontal"></span><span class="button-label">字体设置</span></button>
-              <button id="reader-immersive" class="ghost-btn reader-immersive-toggle reader-toolbar-icon" type="button" aria-pressed="false" title="沉浸阅读" aria-label="沉浸阅读"><span data-qm-icon="maximize-2"></span><span class="button-label">沉浸阅读</span></button>
+              <button id="reader-copy-link" class="ghost-btn reader-toolbar-icon" type="button" title="复制文章内容（C）" aria-label="复制文章内容"><span data-qm-icon="copy"></span><span class="button-label">复制全文</span></button>
+              <button id="reader-prefs-toggle" class="ghost-btn reader-prefs-toggle reader-toolbar-icon" type="button" title="字号、行高、栏宽与字体" aria-label="字体设置" aria-expanded="false"><span data-qm-icon="sliders-horizontal"></span><span class="button-label">字体</span></button>
+              <button id="reader-immersive" class="ghost-btn reader-immersive-toggle reader-toolbar-icon" type="button" aria-pressed="false" title="沉浸阅读（I）" aria-label="沉浸阅读"><span data-qm-icon="maximize-2"></span><span class="button-label">沉浸</span></button>
             </div>
             <div class="reader-toolbar-admin">
               <button id="reader-delete" class="ghost-btn danger reader-delete reader-toolbar-icon hidden" type="button" title="删除页面" aria-label="删除页面"><span data-qm-icon="trash-2"></span><span class="button-label">删除页面</span></button>
@@ -248,6 +307,7 @@
           </div>
         </header>
         <div id="reader-audio"></div>
+        <a id="reader-podcast-notes" class="icon-btn reader-section-icon hidden" href="#" target="_blank" rel="noopener noreferrer" title="阅读私人播客摘要与逐字稿（仅管理员）" aria-label="阅读私人播客摘要与逐字稿（仅管理员）"><span data-qm-icon="file-text"></span></a>
         <div class="reader-tabs" role="tablist" aria-label="文章阅读模式">
           <button class="reader-tab active" type="button" data-tab="original">原文</button>
           <button class="reader-tab" type="button" data-tab="rewrite">中文改写</button>
@@ -561,12 +621,54 @@
     </button>
   </div>
 
+  <!-- ===== Mobile navigation (phones only; hidden by CSS above 860px) ===== -->
+  <div id="mobile-reader-bar" class="mobile-reader-bar" role="toolbar" aria-label="阅读导航">
+    <button id="mobile-back" class="mobile-back" type="button" aria-label="返回文章列表"><span data-qm-icon="arrow-left" aria-hidden="true"></span><span>返回</span></button>
+    <span id="mobile-reader-title" class="mobile-reader-title" aria-hidden="true"></span>
+    <button id="mobile-ai-open" class="mobile-ai-open" type="button" aria-label="打开 AI 伴读"><span data-qm-icon="sparkles" aria-hidden="true"></span><span>AI 伴读</span></button>
+  </div>
+  <nav id="mobile-tabbar" class="mobile-tabbar" aria-label="主导航">
+    <button type="button" data-mobile-tab="home"><span data-qm-icon="newspaper" aria-hidden="true"></span><span>文章</span></button>
+    <button type="button" data-mobile-tab="sources"><span data-qm-icon="rss" aria-hidden="true"></span><span>频道</span></button>
+    <button type="button" data-mobile-tab="starred"><span data-qm-icon="star" aria-hidden="true"></span><span>收藏</span></button>
+    <button type="button" data-mobile-tab="history"><span data-qm-icon="history" aria-hidden="true"></span><span>历史</span></button>
+    <button type="button" data-mobile-tab="me"><span data-qm-icon="user" aria-hidden="true"></span><span>我的</span></button>
+  </nav>
+  <div id="mobile-scrim" class="mobile-scrim" aria-hidden="true"></div>
+
   <!-- ===== Manage sources modal ===== -->
   <div id="manage-modal" class="modal hidden">
     <div class="modal-box">
       <header><h2>管理订阅源</h2><button class="icon-btn" id="manage-close" aria-label="关闭管理订阅源"><span data-qm-icon="x"></span></button></header>
       <div id="manage-status" class="manage-status"></div>
       <div id="manage-list" class="manage-list"></div>
+    </div>
+  </div>
+
+  <div id="wechat-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="wechat-modal-title">
+    <div class="modal-box wechat-catalog-box">
+      <header><div><h2 id="wechat-modal-title">添加公众号</h2><p>选择你想持续阅读的公众号</p></div><button class="icon-btn" id="wechat-close" type="button" aria-label="关闭公众号列表"><span data-qm-icon="x"></span></button></header>
+      <div class="wechat-search-region">
+        <label for="wechat-query">搜索公众号</label>
+        <div class="wechat-search-field"><span data-qm-icon="search" aria-hidden="true"></span><input id="wechat-query" type="search" maxlength="100" autocomplete="off" placeholder="输入名称，快速查找" /></div>
+      </div>
+      <div class="wechat-results-head"><span id="wechat-results-label">全部公众号</span><span id="wechat-result-count"></span></div>
+      <p id="wechat-status" class="wechat-catalog-status" role="status" aria-live="polite"></p>
+      <div class="wechat-list-scroll"><div id="wechat-list" class="wechat-catalog-list"></div></div>
+      <footer class="wechat-catalog-footer">来源：<a href="https://github.com/ginobefun/bestblogs" target="_blank" rel="noopener noreferrer">BestBlogs</a> · 订阅选择仅保存在此浏览器；文章由第三方提供。</footer>
+    </div>
+  </div>
+
+  <div id="podcast-subscribe-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="podcast-subscribe-title">
+    <div class="modal-box podcast-subscribe-box">
+      <header><h2 id="podcast-subscribe-title">添加播客</h2><button class="icon-btn" id="podcast-subscribe-close" type="button" aria-label="关闭添加播客"><span data-qm-icon="x"></span></button></header>
+      <div class="podcast-subscribe-body">
+        <label class="sr-only" for="podcast-subscribe-query">搜索播客名称</label>
+        <input id="podcast-subscribe-query" type="search" maxlength="200" autocomplete="off" placeholder="搜索播客，例如 Lex Fridman" />
+        <p id="podcast-subscribe-status" class="podcast-subscribe-status" role="status" aria-live="polite"></p>
+        <h3 id="podcast-subscribe-section">推荐播客</h3>
+        <div id="podcast-subscribe-list" class="podcast-subscribe-list"></div>
+      </div>
     </div>
   </div>
 
@@ -609,7 +711,7 @@
       <header>
         <div>
           <h2>提交链接</h2>
-          <p>进入读者提交源，支持点赞、点评和 AI 处理。</p>
+          <p>审核通过后进入“读者提交”。可附上标题和正文；仅提交链接时会抓取网页。</p>
         </div>
         <button id="submit-link-close" class="icon-btn" aria-label="关闭提交链接"><span data-qm-icon="x"></span></button>
       </header>
@@ -617,6 +719,14 @@
         <label>
           <span>链接</span>
           <input id="submit-link-url" type="url" placeholder="https://example.com/article" required />
+        </label>
+        <label>
+          <span>标题（选填）</span>
+          <input id="submit-link-title" type="text" maxlength="300" placeholder="文章标题" />
+        </label>
+        <label>
+          <span>剪藏正文（选填）</span>
+          <textarea id="submit-link-markdown" rows="6" maxlength="500000" placeholder="粘贴正文或摘录，支持 Markdown；留空时抓取链接"></textarea>
         </label>
         <label>
           <span>备注</span>
@@ -776,8 +886,11 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/purify.min.js?v=3.4.11"></script>
-  <script src="/lucide-icons.js?v=2"></script>
-  <script src="/app.js?v=159"></script>
+  <script defer src="/purify.min.js?v=3.4.17"></script>
+  <script defer src="/lucide-icons.js?v=3"></script>
+  <script defer src="/request-json.js?v=recovery-20261015"></script>
+  <script defer src="/app.js?v=20261015-recovery3"></script>
+  <script defer src="/podscribe.js?v=6"></script>
+  <script defer src="/web-collection.js?v=1.0.0"></script>
 </body>
 </html>
