@@ -48,6 +48,8 @@ test('private responses are never marked public', () => {
 test('client ip prefers the proxy header only when it is a valid address', () => {
   assert.equal(clientIp({ headers: { 'cf-connecting-ip': '203.0.113.9' }, ip: '172.70.0.1' }), '203.0.113.9');
   assert.equal(clientIp({ headers: { 'cf-connecting-ip': 'not-an-ip' }, ip: '172.70.0.1' }), '172.70.0.1');
+  assert.equal(clientIp({ headers: { 'cf-connecting-ip': '203.0.113.9' }, ip: '198.51.100.4' }), '198.51.100.4');
+  assert.equal(clientIp({ headers: { 'cf-connecting-ip': '203.0.113.9' }, ip: '::ffff:198.51.100.4' }), '198.51.100.4');
 });
 
 test('cursor pagination is stable and strictly after the cursor', () => {
