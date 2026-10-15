@@ -8,6 +8,8 @@ const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qmreader-background-t
 process.env.QMREADER_DATA_DIR = testDataDir;
 
 const fetcher = require('../lib/fetcher');
+const deepseek = require('../lib/deepseek');
+const store = require('../lib/store');
 const jobs = require('../lib/background-jobs');
 
 after(() => fs.rmSync(testDataDir, { recursive: true, force: true }));

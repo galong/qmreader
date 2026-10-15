@@ -10,3 +10,12 @@ data/insights.json
 data/qmreader.sqlite*
 data/*.png
 data/*.log
+
+# Local QA, runtime state and backups never belong in a release.
+artifacts/
+data/
+*.orig
+*.pre-*
+__pycache__/
+*.pyc
+DEPLOYED_COMMIT

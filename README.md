@@ -6,6 +6,8 @@
 
 QMReader is a self-hosted RSS reading workbench that turns feeds into bilingual titles, rewrites, comments, and reusable public reading assets.
 
+网站代码已纳入 GitHub 发布流程；匿名可直接阅读，登录用于同步与贡献。部署、回滚及数据恢复边界见 [恢复手册](ops/RECOVERY.md)。
+
 [在线体验](https://rss.qiaomu.ai) · [产品巡游](#产品巡游) · [快速开始](#快速开始) · [部署](#部署) · [API](#api) · [License](#license)
 
 ![QMReader 正式站首页：信息源、文章列表、阅读器和 AI 伴读工作区](docs/assets/qmreader-home.png)
