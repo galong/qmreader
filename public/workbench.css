@@ -296,3 +296,71 @@ body[data-theme="light"] #app > #reader-pane { background: var(--surface); }
 [data-theme="dark"] #app .wb-actions > [aria-pressed="true"],
 [data-theme="dark"] #app .wb-actions > .active { background: rgba(255, 255, 255, 0.11); }
 [data-theme="dark"] #app .wb-menu { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
+
+/* ================= polish pass ================= */
+/* sidebar: wider so the brand never truncates; quiet submit row */
+#app { --sidebar-width: 220px; }
+#app.sidebar-collapsed { --sidebar-width: 64px; }
+#app .brand-name { font-size: 14px; letter-spacing: -0.01em; }
+#app #sidebar #submit-link-open {
+  background: transparent;
+  color: var(--text-1);
+  border: 1px dashed var(--border);
+  box-shadow: none;
+  height: 32px;
+  font-weight: 500;
+}
+#app #sidebar #submit-link-open:hover { background: rgba(17, 17, 17, 0.045); color: var(--text-0); }
+[data-theme="dark"] #app #sidebar #submit-link-open:hover { background: rgba(255, 255, 255, 0.07); }
+#app .view-btn { height: 32px; font-size: 13.5px; }
+#app .feed-item { height: 30px; border-radius: 7px; }
+#app .feed-item .err-dot { opacity: 0.6; }
+
+/* list: calmer header, A-style rows */
+#app .pane-header { padding-top: 12px; }
+#app .entry-pane-tabs { margin: 6px 12px 0; padding: 0; border: 0; gap: 14px; }
+#app .entry-pane-tab { font-size: 12.5px; color: var(--text-2); padding: 8px 0; }
+#app .entry-pane-tab.active { color: var(--text-0); font-weight: 600; }
+#app .entry-list { padding: 4px 6px 16px; }
+#app .entry-card { padding: 11px 12px 12px 22px; margin: 0 0 2px; }
+#app .entry-card:hover { background: rgba(17, 17, 17, 0.04); }
+#app .entry-card.active:hover { background: var(--surface); }
+[data-theme="dark"] #app .entry-card:hover { background: rgba(255, 255, 255, 0.05); }
+#app .entry-card .unread-dot { left: 9px; }
+#app .entry-source-line .src { font-size: 12px; color: var(--text-2); }
+#app .entry-time { font-size: 12px; color: var(--text-2); }
+#app .entry-card .entry-title { margin-top: 5px; font-size: 14.5px; line-height: 1.45; }
+#app .entry-card .entry-summary { margin-top: 4px; font-size: 12.5px; line-height: 1.55; color: var(--text-2); }
+
+/* reader bar: source crumb on the left, controls on the right */
+#app .wb-crumb {
+  min-width: 0;
+  max-width: 28%;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#app .wb-modes { margin-left: auto; }
+#app .wb-actions { margin-left: 4px; }
+
+/* reader header: title leads, meta whispers */
+#app #reader .reader-head { padding-top: 30px; padding-bottom: 20px; margin-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }
+#app #reader .reader-kicker-row { margin-bottom: 14px; }
+#app #reader .reader-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+#app #reader .reader-meta-row,
+#app #reader .reader-meta,
+#app #reader .reader-view-count { font-size: 12.5px; color: var(--text-2); }
+#app #reader #reader-title { font-size: clamp(24px, 2vw, 28px); font-weight: 650; line-height: 1.38; }
+#app #reader .reader-title-zh { margin-top: 6px; font-size: 14.5px; }
+#app #reader .reader-content { margin-top: 6px; }
+@media (max-width: 760px) { #app .wb-crumb { display: none; } #app .wb-modes { margin-left: 0; } }

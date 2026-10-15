@@ -22,6 +22,7 @@
   bar.setAttribute('role', 'toolbar');
   bar.setAttribute('aria-label', '阅读工具');
   bar.innerHTML = `
+    <div class="wb-crumb" aria-hidden="true"></div>
     <div class="wb-modes" role="group" aria-label="阅读版本">
       <button type="button" data-wb-mode="original" aria-pressed="true">原文</button>
       <button type="button" data-wb-mode="translation" aria-pressed="false">译文</button>
@@ -141,6 +142,19 @@
     $('b', next).textContent = target.titleZh || target.title || '';
   };
 
+  /* ---------- crumb: keeps the source in view while scrolling ---------- */
+  const crumb = $('.wb-crumb', bar);
+  const syncCrumb = () => {
+    const src = $('#reader-source');
+    let name = '';
+    if (src) {
+      const copy = src.cloneNode(true);
+      copy.querySelectorAll('.letter-icon, .favicon, img, svg').forEach(node => node.remove());
+      name = copy.textContent.replace(/\s+/g, ' ').trim();
+    }
+    if (crumb.textContent !== name) crumb.textContent = name;
+  };
+
   /* ---------- keep everything in sync ---------- */
   let queued = false;
   const syncAll = () => {
@@ -151,6 +165,7 @@
       syncModes();
       syncAi();
       syncNext();
+      syncCrumb();
     });
   };
   const observer = new MutationObserver(syncAll);
@@ -158,6 +173,7 @@
     ['#reader-original-panel', { attributes: true, attributeFilter: ['class'] }],
     ['#reader-translation', { attributes: true, attributeFilter: ['class'] }],
     ['#reader-rewrite-panel', { attributes: true, attributeFilter: ['class'] }],
+    ['#reader-source', { childList: true, subtree: true, characterData: true }],
     ['#reader-title', { childList: true, subtree: true, characterData: true }],
     ['.reader-tab[data-tab="rewrite"]', { childList: true, characterData: true, subtree: true }],
     ['#entry-list', { childList: true }],
