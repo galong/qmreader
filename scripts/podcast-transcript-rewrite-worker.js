@@ -42,7 +42,7 @@ async function processEntry(entry) {
     });
   }
   const result = await deepseek.rewriteEntry(entry, {
-    provider: 'deepseek', model: 'deepseek-v4-flash', author: '向阳乔木',
+    provider: 'deepseek', model: 'deepseek-flash', author: '向阳乔木',
     temperature: 0.5, maxTokens: 9000,
   });
   return { status: result.cached ? 'cached' : 'rewritten', sourceId: entry.sourceId, entryId: entry.id, episodeId,
