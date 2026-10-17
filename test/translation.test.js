@@ -71,6 +71,14 @@ test('custom provider completions keep their original token and reasoning option
   assert.equal(sent.reasoning_effort, undefined);
 });
 
+test('default website requests reserve the full bounded Flash rewrite allowance', () => {
+  const { requestAiConfig } = require('../lib/request-ai-config');
+  const config = deepseek.getConfig(requestAiConfig({get: () => ''}));
+  assert.equal(config.maxTokens, 7000);
+  const custom = deepseek.getConfig({provider:'openai-compatible', baseUrl:'https://example.com/v1', model:'test-model'});
+  assert.equal(custom.maxTokens, 2000);
+});
+
 test('server-funded completion refuses a body model override before network access', async t => {
   let calls = 0;
   t.mock.method(globalThis, 'fetch', async () => { calls++; return openAiResponse('OK'); });
