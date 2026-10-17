@@ -52,5 +52,5 @@ test('real public HTTP serves first list, anonymous article and distinct minimal
   assert.equal(article.status, 200);
   assert.match((await article.json()).entry.content, /Public body without registration/);
   assert.equal((await fetch(base + '/api/entry/public-1')).status, 404);
-  assert.equal((await fetch(base + '/api/version').then(r => r.json())).version, '1.0.2');
+  assert.equal((await fetch(base + '/api/version').then(r => r.json())).version, require('../package.json').version);
 });
