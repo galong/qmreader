@@ -44,7 +44,7 @@ test('real Chinese translation HTML is preserved across inline tags and list bou
   assert.equal(deepseek.__test.translationHtmlMatchesTarget('阅读器不会上传原书。', '<p>阅读器会上传原书。</p>'), false);
 });
 
-test('official Flash completion uses high thinking with bounded reasoning headroom', async t => {
+test('official Flash translation and rewrite disable thinking without consuming answer budget', async t => {
   let sent;
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     sent = JSON.parse(options.body);
@@ -52,11 +52,12 @@ test('official Flash completion uses high thinking with bounded reasoning headro
   });
   const config = providerConfig({provider:'deepseek', baseUrl:'https://api.deepseek.com', model:'deepseek-flash'});
   await deepseek.__test.postChatCompletion(config, {messages:[{role:'user',content:'Translate'}], max_tokens:800});
-  assert.deepEqual(sent.thinking, {type:'enabled'});
-  assert.equal(sent.reasoning_effort, 'high');
-  assert.equal(sent.max_tokens, 2848);
+  assert.deepEqual(sent.thinking, {type:'disabled'});
+  assert.equal(sent.reasoning_effort, undefined);
+  assert.equal(sent.max_tokens, 800);
+  assert.equal(sent.temperature, 0.1);
   await deepseek.__test.postChatCompletion(config, {messages:[{role:'user',content:'Rewrite'}], max_tokens:9000});
-  assert.equal(sent.max_tokens, 16384);
+  assert.equal(sent.max_tokens, 9000);
 });
 
 test('custom provider completions keep their original token and reasoning options', async t => {
