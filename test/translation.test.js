@@ -56,7 +56,7 @@ test('official Flash completion uses high thinking with bounded reasoning headro
   assert.equal(sent.reasoning_effort, 'high');
   assert.equal(sent.max_tokens, 2848);
   await deepseek.__test.postChatCompletion(config, {messages:[{role:'user',content:'Rewrite'}], max_tokens:9000});
-  assert.equal(sent.max_tokens, 9000);
+  assert.equal(sent.max_tokens, 16384);
 });
 
 test('custom provider completions keep their original token and reasoning options', async t => {

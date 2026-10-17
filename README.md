@@ -391,7 +391,7 @@ Copy `.env.example` to `.env` and fill in your own keys. The repository does not
 Important variables:
 
 - `DEEPSEEK_API_KEY`: server-side key for title translation and default rewriting.
-- `DEEPSEEK_MODEL`: default `deepseek-flash`, with thinking enabled and `reasoning_effort: high`. Legacy `deepseek-v4-flash` settings normalize to this alias; Pro is rejected. Reasoning shares the output token allowance: requests reserve 2,048 extra tokens while keeping the existing 9,000-token site ceiling.
+- `DEEPSEEK_MODEL`: default `deepseek-flash`, with thinking enabled and `reasoning_effort: high`. Legacy `deepseek-v4-flash` settings normalize to this alias; Pro is rejected. Reasoning shares the output token allowance: short requests reserve 2,048 extra tokens, and requests for at least 5,000 tokens reserve 8,192 extra tokens. The per-request ceiling is 16,384 tokens; the existing daily budget and concurrency limits still apply to the full allowance.
 - `ADMIN_EMAIL` / `ADMIN_PASSWORD`: admin account seed.
 - `HOST` / `PORT`: HTTP bind address and port.
 - `STARTUP_REFRESH_DELAY_MS`: startup refresh delay, or `-1` to disable.

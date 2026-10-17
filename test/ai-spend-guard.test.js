@@ -53,8 +53,16 @@ test('server-funded model, endpoint, output and input are checked at the last bo
     assert.throws(() => g.reserve(config, { ...payload, model: bad }, 1000), e => e.code === 'AI_MODEL_FORBIDDEN');
   }
   assert.throws(() => g.reserve({ ...config, baseUrl: 'https://attacker.example/v1' }, payload, 1000), e => e.code === 'AI_ENDPOINT_FORBIDDEN');
-  assert.throws(() => g.reserve(config, { ...payload, max_tokens: 10000 }, 1000), e => e.code === 'AI_OUTPUT_LIMIT');
+  assert.throws(() => g.reserve(config, { ...payload, max_tokens: 16385 }, 1000), e => e.code === 'AI_OUTPUT_LIMIT');
   assert.throws(() => g.reserve(config, { ...payload, messages: [{ role: 'user', content: 'x'.repeat(110000) }] }, 1000), e => e.code === 'AI_INPUT_LIMIT');
+});
+
+test('long high-reasoning requests still reserve their entire allowance against the daily budget', t => {
+  const g = fixture(t, {dailyBudgetMicros: 200000}).open();
+  const long = {...payload, max_tokens:16384};
+  const ticket = g.reserve(config, long, 1000);
+  g.finish(ticket, {usage:{prompt_tokens:10,completion_tokens:10}});
+  assert.throws(() => g.reserve(config, long, 1000), e => e.code === 'AI_DAILY_BUDGET');
 });
 
 test('zero budget disables paid calls; caller-owned keys do not spend the site allowance', t => {
