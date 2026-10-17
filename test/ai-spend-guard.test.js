@@ -14,14 +14,14 @@ function fixture(t, limits = {}) {
   const guards = [];
   const open = () => { const g = createAiSpendGuard({ file, now: () => now, limits }); guards.push(g); return g; };
   t.after(() => { for (const g of guards) g.close(); fs.rmSync(dir, { recursive: true, force: true }); });
-  return { open, advance: ms => { now += ms; } };
+  return { file, open, advance: ms => { now += ms; } };
 }
 
 test('persisted reservations enforce a shared daily ceiling across workers and restarts', t => {
   const f = fixture(t, { dailyBudgetMicros: 7000, globalConcurrent: 8 });
   const a = f.open(); const b = f.open();
   const ticket = a.reserve(config, payload, 1000);
-  a.finish(ticket, { usage: { prompt_tokens: 1, completion_tokens: 1 } });
+  a.finish(ticket, { status: 'error' });
   assert.throws(() => b.reserve(config, payload, 1000), e => e.code === 'AI_DAILY_BUDGET');
   assert.throws(() => f.open().reserve(config, payload, 1000), e => e.code === 'AI_DAILY_BUDGET');
   f.advance(24 * 60 * 60 * 1000);
@@ -57,16 +57,42 @@ test('server-funded model, endpoint, output and input are checked at the last bo
   assert.throws(() => g.reserve(config, { ...payload, messages: [{ role: 'user', content: 'x'.repeat(110000) }] }, 1000), e => e.code === 'AI_INPUT_LIMIT');
 });
 
-test('long high-reasoning requests still reserve their entire allowance against the daily budget', t => {
+test('long requests reserve their entire allowance until usage is known', t => {
   const g = fixture(t, {dailyBudgetMicros: 200000}).open();
   const long = {...payload, max_tokens:16384};
   const ticket = g.reserve(config, long, 1000);
-  g.finish(ticket, {usage:{prompt_tokens:10,completion_tokens:10}});
   assert.throws(() => g.reserve(config, long, 1000), e => e.code === 'AI_DAILY_BUDGET');
+  g.finish(ticket, {usage:{prompt_tokens:10,completion_tokens:10}});
+  assert.ok(g.reserve(config, long, 1000));
+});
+
+test('reported usage settles across workers while malformed and failed usage stays reserved', t => {
+  const f = fixture(t, { dailyBudgetMicros: 7000, globalConcurrent: 8 });
+  const a = f.open(); const b = f.open();
+  const ticket = a.reserve(config, payload, 1000);
+  a.finish(ticket, { usage: { prompt_tokens: 1, completion_tokens: 1 } });
+  const next = b.reserve(config, payload, 1000);
+  b.finish(next, { usage: { prompt_tokens: -1, completion_tokens: 1 } });
+  assert.throws(() => f.open().reserve(config, payload, 1000), e => e.code === 'AI_DAILY_BUDGET');
 });
 
 test('zero budget disables paid calls; caller-owned keys do not spend the site allowance', t => {
   const g = fixture(t, { dailyBudgetMicros: 0 }).open();
   assert.throws(() => g.reserve(config, payload, 1000), e => e.code === 'AI_DAILY_BUDGET');
   assert.equal(g.reserve({ ...config, usesServerDeepSeekKey: false }, payload, 1000), null);
+});
+
+test('explicit reconciliation only settles completed known usage and is idempotent', t => {
+  const f = fixture(t); const guard = f.open();
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(f.file);
+  const insert = db.prepare(`INSERT INTO ai_spend_reservations VALUES (?,?,?,?,?,?,?,?,?,?)`);
+  insert.run('legacy-ok', 'system', '2026-10-15', 1, 0, 50000, 'deepseek-v4-flash', 'ok', 100, 20);
+  insert.run('legacy-error', 'system', '2026-10-15', 2, 0, 50000, 'deepseek-v4-flash', 'error', 100, 20);
+  insert.run('legacy-pending', 'system', '2026-10-15', 3, 1000, 50000, 'deepseek-v4-flash', 'pending', null, null);
+  assert.equal(guard.reconcileCompleted('2026-10-15'), 1);
+  assert.equal(guard.reconcileCompleted('2026-10-15'), 0);
+  assert.equal(db.prepare('SELECT reserved_micros FROM ai_spend_reservations WHERE id=?').get('legacy-ok').reserved_micros, 360);
+  assert.equal(db.prepare('SELECT sum(reserved_micros) amount FROM ai_spend_reservations WHERE id<>?').get('legacy-ok').amount, 100000);
+  db.close();
 });
