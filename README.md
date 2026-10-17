@@ -104,7 +104,7 @@ HOST=127.0.0.1 PORT=3000 npm start
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `DEEPSEEK_API_KEY` | 空 | 服务端 DeepSeek API key，用于标题翻译和默认改写 |
-| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | 服务端默认标题翻译和中文改写模型 |
+| `DEEPSEEK_MODEL` | `deepseek-flash` | 服务端默认标题翻译和中文改写模型，启用思考，推理强度 `high` |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | DeepSeek OpenAI-compatible API 地址 |
 | `AI_PROVIDER` | `deepseek` | 备用服务端 provider 名称 |
 | `AI_API_KEY` | 空 | 非 DeepSeek provider 的服务端 key |
@@ -130,7 +130,7 @@ HOST=127.0.0.1 PORT=3000 npm start
 | `AUTO_REWRITE_SOURCE_IDS` | 空 | 限定自动改写源；空值表示启用源中可改写的内容 |
 | `AUTO_REWRITE_LIMIT_PER_SOURCE` | `3` | 每个源默认自动改写条数 |
 | `AUTO_REWRITE_LIMIT_HACKERNEWS` | `10` | Hacker News 自动改写条数 |
-| `AUTO_REWRITE_MODEL` | `deepseek-v4-flash` | 自动改写模型 |
+| `AUTO_REWRITE_MODEL` | `deepseek-flash` | 自动改写模型 |
 | `UMAMI_WEBSITE_ID` | 空 | 可选 Umami 站点 ID |
 | `UMAMI_SRC` | `https://umami.qiaomu.ai/script.js` | 可选 Umami 脚本地址 |
 
@@ -391,7 +391,7 @@ Copy `.env.example` to `.env` and fill in your own keys. The repository does not
 Important variables:
 
 - `DEEPSEEK_API_KEY`: server-side key for title translation and default rewriting.
-- `DEEPSEEK_MODEL`: default `deepseek-v4-flash`.
+- `DEEPSEEK_MODEL`: default `deepseek-flash`, with thinking enabled and `reasoning_effort: high`. Legacy `deepseek-v4-flash` settings normalize to this alias; Pro is rejected. Reasoning shares the output token allowance: requests reserve 2,048 extra tokens while keeping the existing 9,000-token site ceiling.
 - `ADMIN_EMAIL` / `ADMIN_PASSWORD`: admin account seed.
 - `HOST` / `PORT`: HTTP bind address and port.
 - `STARTUP_REFRESH_DELAY_MS`: startup refresh delay, or `-1` to disable.
