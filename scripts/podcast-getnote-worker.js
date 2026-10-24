@@ -15,6 +15,7 @@ const PENDING_RECHECK_MS = 15 * 60 * 1000;
 const MIN_SUBMIT_INTERVAL_MS = 75 * 1000;
 const MAX_DAILY_SUBMISSIONS = 45;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const FRESH_MS = 3 * DAY_MS;
 
 function writePrivateJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -95,6 +96,11 @@ function candidates(cache, state, now = Date.now()) {
       const aSubmitted = Boolean(state[a.episodeId]?.noteId);
       const bSubmitted = Boolean(state[b.episodeId]?.noteId);
       if (aSubmitted !== bSubmitted) return Number(bSubmitted) - Number(aSubmitted);
+      // 新期优先：精读站每天追新靠它，不能排在历史补档后面（排晚了会被迫改用付费的豆包转写）
+      const aFresh = now - a.publishedTs < FRESH_MS;
+      const bFresh = now - b.publishedTs < FRESH_MS;
+      if (!aSubmitted && aFresh !== bFresh) return Number(bFresh) - Number(aFresh);
+      if (!aSubmitted && aFresh && bFresh) return b.publishedTs - a.publishedTs;
       if (!aSubmitted && sourceCounts[a.sourceId] !== sourceCounts[b.sourceId]) return sourceCounts[a.sourceId] - sourceCounts[b.sourceId];
       return b.publishedTs - a.publishedTs;
     });
