@@ -7,7 +7,7 @@ const deepseek = require('../lib/deepseek');
 const store = require('../lib/store');
 const podcastTranscript = require('../lib/podcast-transcript');
 
-const SOURCE_IDS = ['zhangxiaojun', '42zhangjing', 'latetalk', 'bannatie', 'nexttoken'];
+const SOURCE_IDS = ['zhangxiaojun', '42zhangjing', 'latetalk', 'bannatie', 'nexttoken', 'crossing', 'aialchemy', '35huan', 'zhixing', 'mianji'];
 const NOTES_DIR = process.env.QMREADER_PODCAST_NOTES_DIR || '/var/lib/qmreader-podcast-notes';
 
 function writePrivateNote(episodeId, note) {

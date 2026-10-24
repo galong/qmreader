@@ -8462,7 +8462,7 @@ async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentI
   const podcastNotesLink = $('#reader-podcast-notes');
   if (podcastNotesLink) {
     const youtubePodcast = e.sourceId === 'allin' || e.sourceId === 'joerogan';
-    const showPrivateNotes = Boolean(isAdmin() && (youtubePodcast || ['zhangxiaojun', '42zhangjing', 'latetalk', 'bannatie', 'nexttoken'].includes(e.sourceId)));
+    const showPrivateNotes = Boolean(isAdmin() && (youtubePodcast || ['zhangxiaojun', '42zhangjing', 'latetalk', 'bannatie', 'nexttoken', 'crossing', 'aialchemy', '35huan', 'zhixing', 'mianji'].includes(e.sourceId)));
     podcastNotesLink.classList.toggle('hidden', !showPrivateNotes);
     if (showPrivateNotes) {
       podcastNotesLink.href = `/${youtubePodcast ? 'youtube-notes' : 'podcast-notes'}/${encodeURIComponent(e.id)}`;

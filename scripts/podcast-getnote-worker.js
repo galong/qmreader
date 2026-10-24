@@ -4,7 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const SOURCE_IDS = ['zhangxiaojun', '42zhangjing', 'latetalk', 'bannatie', 'nexttoken'];
+// nexttoken uses the official nexttoken.tv transcript (scripts/nexttoken-official-transcript.js, server only for now).
+const SOURCE_IDS = ['zhangxiaojun', '42zhangjing', 'latetalk', 'bannatie', 'crossing', 'aialchemy', '35huan', 'zhixing', 'mianji'];
 const DATA_DIR = process.env.QMREADER_DATA_DIR || path.join(__dirname, '..', 'data');
 const NOTES_DIR = process.env.QMREADER_PODCAST_NOTES_DIR || '/var/lib/qmreader-podcast-notes';
 const CLI = process.env.GETNOTE_CLI || '/usr/bin/getnote';
