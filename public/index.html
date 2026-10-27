@@ -10,7 +10,7 @@
   <link rel="alternate" type="application/rss+xml" title="QMReader 公开资产 RSS" href="https://rss.qiaomu.ai/assets.xml" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="shortcut icon" href="/favicon.svg" />
-  <link rel="stylesheet" href="/styles.css?v=20261027-polish1" />
+  <link rel="stylesheet" href="/styles.css?v=20261027-chat2" />
   <meta name="description" content="精选中英文 RSS，AI 自动译成好读的中文，边读边问 AI 的阅读器。" />
   <link rel="canonical" href="https://rss.qiaomu.ai/" />
   <meta property="og:site_name" content="QMReader" />
@@ -41,7 +41,7 @@
     }, { once: true });
   </script>
   <link rel="stylesheet" href="/web-collection.css?v=1.0.0">
-  <link rel="stylesheet" href="/workbench.css?v=20261027-polish1">
+  <link rel="stylesheet" href="/workbench.css?v=20261027-chat2">
 </head>
 <body data-theme="light">
   <div id="app">
@@ -591,9 +591,14 @@
           <div id="agent-inline-context" class="agent-inline-context hidden"></div>
           <div class="agent-composer">
             <textarea id="agent-input" rows="2" placeholder="就这篇文章提问…（回车发送，Shift+回车换行）" disabled></textarea>
-            <div class="agent-composer-actions">
-              <button id="agent-send" class="ghost-btn" type="submit" title="发送" aria-label="发送" disabled><span data-qm-icon="send"></span></button>
+            <div class="agent-composer-bar">
+              <button id="agent-model-btn" class="agent-model-btn" type="button" aria-haspopup="listbox" aria-expanded="false" title="切换对话模型"><span class="agent-model-tile" aria-hidden="true"></span><span class="agent-model-name">模型</span><span class="agent-model-caret" data-qm-icon="chevron-down" aria-hidden="true"></span></button>
+              <span id="agent-count" class="agent-count" aria-live="off"></span>
+              <div class="agent-composer-actions">
+                <button id="agent-send" class="ghost-btn" type="submit" title="发送" aria-label="发送" disabled><span data-qm-icon="send"></span></button>
+              </div>
             </div>
+            <div id="agent-model-pop" class="agent-model-pop" role="listbox" aria-label="选择对话模型" hidden></div>
           </div>
         </form>
       </section>
@@ -882,12 +887,12 @@
   <div id="toast" class="toast hidden"></div>
 
   <script defer src="/purify.min.js?v=3.4.17"></script>
-  <script defer src="/lucide-icons.js?v=4"></script>
+  <script defer src="/lucide-icons.js?v=6"></script>
   <script defer src="/request-json.js?v=recovery-20261015"></script>
   <script defer src="/ai-providers.js?v=20261027-release6"></script>
-  <script defer src="/app.js?v=20261027-polish1"></script>
+  <script defer src="/app.js?v=20261027-chat2"></script>
   <script defer src="/podscribe.js?v=6"></script>
   <script defer src="/web-collection.js?v=1.0.0"></script>
-  <script defer src="/workbench.js?v=20261027-polish1"></script>
+  <script defer src="/workbench.js?v=20261027-chat2"></script>
 </body>
 </html>

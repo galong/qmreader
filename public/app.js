@@ -8067,7 +8067,7 @@ function renderAgentMessages(extraPending = false, { preserveScroll = false } = 
   for (const message of messages) {
     const row = document.createElement('div');
     const mine = message.role === 'user' && (message.canDelete || !message.id || (state.me && message.contributorId === state.me.id));
-    row.className = `agent-msg ${message.role}${message.pending ? ' pending' : ''}${mine ? ' mine' : ''}`;
+    row.className = `agent-msg ${message.role}${message.pending ? ' pending' : ''}${message.error ? ' error' : ''}${mine ? ' mine' : ''}`;
     if (message.id) row.id = `chat-${message.id}`;
     const head = document.createElement('div');
     head.className = 'agent-msg-head';
@@ -8102,6 +8102,16 @@ function renderAgentMessages(extraPending = false, { preserveScroll = false } = 
       setButtonIconLabel(copy, 'copy', '复制');
       copy.onclick = () => copyText(message.content, '消息已复制');
       actions.appendChild(copy);
+      if (message.error && message.retryText) {
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'agent-msg-action agent-msg-retry';
+        retry.title = '重新发送这个问题';
+        retry.setAttribute('aria-label', '重新发送这个问题');
+        setButtonIconLabel(retry, 'rotate-ccw', '重试');
+        retry.onclick = () => retryAgentMessage(message);
+        actions.appendChild(retry);
+      }
       if (message.canDelete && message.id) {
         const del = document.createElement('button');
         del.type = 'button';
@@ -8116,7 +8126,9 @@ function renderAgentMessages(extraPending = false, { preserveScroll = false } = 
     }
     const body = document.createElement('div');
     body.className = 'agent-msg-body';
-    body.innerHTML = renderMarkdownLite(message.content);
+    body.innerHTML = message.pending
+      ? '<span class="agent-typing" role="status" aria-label="正在生成"><i></i><i></i><i></i></span>'
+      : renderMarkdownLite(message.content);
     row.appendChild(head);
     row.appendChild(body);
     if (footer.childElementCount) row.appendChild(footer);
@@ -8279,12 +8291,11 @@ function updateAgentControls() {
   else if (!hasKey) input.placeholder = '填写 API Key 后提问';
   else input.placeholder = '问当前文章…';
   input.disabled = !hasEntry || !hasUser || !hasKey || state.agentBusy;
-  send.disabled = !hasEntry || !hasUser || !hasKey || state.agentBusy || !input.value.trim();
-  setElementIcon(send, state.agentBusy ? 'loader-circle' : 'send', {
-    className: state.agentBusy ? 'app-icon app-icon-spin' : 'app-icon',
-  });
-  send.title = state.agentBusy ? '正在生成' : '发送';
-  send.setAttribute('aria-label', state.agentBusy ? '正在生成' : '发送');
+  send.disabled = state.agentBusy ? false : (!hasEntry || !hasUser || !hasKey || !input.value.trim());
+  setElementIcon(send, state.agentBusy ? 'square' : 'send', { className: 'app-icon' });
+  send.title = state.agentBusy ? '停止生成' : '发送';
+  send.setAttribute('aria-label', state.agentBusy ? '停止生成' : '发送');
+  send.classList.toggle('is-stop', Boolean(state.agentBusy));
   if (panel) panel.classList.toggle('agent-busy', Boolean(state.agentBusy));
   $$('.agent-prompt').forEach(btn => { btn.disabled = !hasEntry || !hasUser || !hasKey || state.agentBusy; });
   const copyThread = $('#agent-copy-thread');
@@ -8339,7 +8350,11 @@ async function sendAgentMessage(text) {
   const outboundContent = withAgentContext(content);
   state.agentMessages.push({ role: 'user', author: state.me.displayName, content: outboundContent, createdAt: Date.now() });
   $('#agent-input').value = '';
+  $('#agent-input').style.height = '';
+  $('#agent-count').textContent = '';
   state.agentBusy = true;
+  const controller = new AbortController();
+  state.agentAbort = controller;
   renderAgentMessages(true);
   updateAgentControls();
 
@@ -8349,18 +8364,44 @@ async function sendAgentMessage(text) {
       aiConfig: agentConfig,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: [{ role: 'user', content: outboundContent }] }),
+      signal: controller.signal,
+      timeoutMs: 120000,
     });
     if (state.activeEntry?.id === entry.id) {
       state.agentMessages = [...state.agentMessages.filter(m => !m.pending), data.assistantMessage || { role: 'assistant', author: 'DeepSeek', content: data.answer }];
       await loadAgentMessages(entry);
     }
   } catch (err) {
-    state.agentMessages.push({ role: 'assistant', author: '系统', content: `对话失败：${err.message}` });
-    if (state.activeEntry?.id === entry.id) renderAgentMessages();
+    if (err && err.name === 'AbortError') {
+      // Stopped by the reader: drop the unsent question from the thread and give the text back.
+      state.agentMessages = state.agentMessages.filter(m => !m.pending && m.content !== outboundContent);
+      if (state.activeEntry?.id === entry.id) {
+        $('#agent-input').value = content;
+        renderAgentMessages();
+      }
+    } else {
+      state.agentMessages.push({ role: 'assistant', author: '系统', content: `对话失败：${err.message}`, error: true, retryText: content });
+      if (state.activeEntry?.id === entry.id) renderAgentMessages();
+    }
   } finally {
+    if (state.agentAbort === controller) state.agentAbort = null;
     state.agentBusy = false;
     updateAgentControls();
   }
+}
+
+function stopAgentMessage() {
+  if (state.agentAbort) state.agentAbort.abort();
+}
+
+function retryAgentMessage(failed) {
+  if (!failed || !failed.retryText || state.agentBusy) return;
+  const index = state.agentMessages.indexOf(failed);
+  if (index < 0) return;
+  // Remove the failure notice and the question that produced it, then ask again.
+  const previous = state.agentMessages[index - 1];
+  state.agentMessages.splice(previous && previous.role === 'user' && !previous.id ? index - 1 : index, previous && previous.role === 'user' && !previous.id ? 2 : 1);
+  sendAgentMessage(failed.retryText);
 }
 
 async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentId = '', annotationId = '', chatMessageId = '', updateUrl = true, replaceUrl = false } = {}) {
@@ -9408,6 +9449,65 @@ function renderAiProfileControls() {
   renderAiProfileSelect('#translation-profile-select', 'translation');
   renderAiProfileSelect('#rewrite-profile-select', 'rewrite');
   renderAiProfileSelect('#agent-profile-select', 'agent');
+  renderAgentModelButton();
+}
+
+function aiProfileInitial(profile) {
+  const name = String(profile && (profile.name || profile.providerName) || 'AI').trim();
+  return Array.from(name)[0] || 'A';
+}
+
+function aiProfileHue(profile) {
+  const name = String(profile && (profile.providerName || profile.name) || '');
+  let hash = 0;
+  for (const ch of name) hash = (hash * 31 + ch.codePointAt(0)) % 360;
+  return hash;
+}
+
+function agentModelTile(profile) {
+  return `<span class="agent-model-tile is-letter" style="--h:${aiProfileHue(profile)}">${escapeHtml(aiProfileInitial(profile))}</span>`;
+}
+
+function renderAgentModelButton() {
+  const btn = $('#agent-model-btn');
+  if (!btn) return;
+  const profile = aiProfileForPurpose('agent');
+  const model = String(profile && profile.model || '').trim();
+  const usable = Boolean(profile && (profile.apiKey || profile.oauthAccountId));
+  btn.innerHTML = `${agentModelTile(profile)}<span class="agent-model-name">${escapeHtml(model || profile.name || '选择模型')}</span><span class="agent-model-caret">${lucideIcon('chevron-down')}</span>`;
+  btn.title = `当前：${profile.name || 'AI 配置'}${model ? ` · ${model}` : ''}${usable ? '' : '（未配置）'}`;
+  btn.classList.toggle('is-unset', !usable);
+  btn.disabled = !state.me;
+  if (!$('#agent-model-pop')?.hidden) renderAgentModelPopover();
+}
+
+function renderAgentModelPopover() {
+  const pop = $('#agent-model-pop');
+  if (!pop) return;
+  const current = aiProfileForPurpose('agent');
+  const rows = state.aiProfiles.map(item => {
+    const usable = Boolean(item.apiKey || item.oauthAccountId);
+    const model = String(item.model || '').trim();
+    return `<button class="agent-model-row${item.id === current.id ? ' is-current' : ''}${usable ? '' : ' is-unset'}" type="button" role="option" aria-selected="${item.id === current.id}" data-agent-profile="${escapeHtml(item.id)}">
+      ${agentModelTile(item)}
+      <span class="agent-model-row-name">${escapeHtml(item.name || item.providerName || 'AI 配置')}</span>
+      <span class="agent-model-row-meta">${escapeHtml(usable ? model : '未配置')}</span>
+      <span class="agent-model-check">${item.id === current.id ? lucideIcon('check') : ''}</span>
+    </button>`;
+  }).join('');
+  pop.innerHTML = `<div class="agent-model-group">已连接的服务</div><div class="agent-model-list">${rows || '<p class="agent-model-empty">还没有模型配置</p>'}</div>
+    <div class="agent-model-foot"><button class="agent-model-manage" type="button" data-agent-model-manage>${lucideIcon('settings')}<span>管理模型</span></button></div>`;
+}
+
+function setAgentModelPopover(open) {
+  const pop = $('#agent-model-pop');
+  const btn = $('#agent-model-btn');
+  if (!pop || !btn) return;
+  if (open && !state.me) return;
+  if (open) renderAgentModelPopover();
+  pop.hidden = !open;
+  btn.setAttribute('aria-expanded', String(Boolean(open)));
+  if (open) pop.querySelector('.is-current, .agent-model-row')?.scrollIntoView({ block: 'nearest' });
 }
 
 function setAiProfileForPurpose(purpose, profileId) {
@@ -10599,15 +10699,19 @@ $$('.comment-sort-btn').forEach(btn => {
 $('#comment-login').onclick = () => openAuth('login');
 $('#agent-form').onsubmit = (e) => {
   e.preventDefault();
+  if (state.agentBusy) { stopAgentMessage(); return; }
   sendAgentMessage($('#agent-input').value);
 };
 $('#agent-input').oninput = (e) => {
   e.target.style.height = 'auto';
   e.target.style.height = `${Math.min(e.target.scrollHeight, 170)}px`;
+  const length = e.target.value.length;
+  $('#agent-count').textContent = length > 200 ? String(length) : '';
   updateAgentControls();
 };
 $('#agent-input').onkeydown = (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
+  // Enter that confirms an IME candidate must not send the half-typed question.
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
     e.preventDefault();
     sendAgentMessage(e.currentTarget.value);
   }
@@ -10618,6 +10722,20 @@ $('#agent-open').onclick = () => setContextPanel(state.contextPanel, { expand: t
 const agentCopyThread = $('#agent-copy-thread');
 if (agentCopyThread) agentCopyThread.onclick = copyAgentThread;
 $('#agent-settings').onclick = () => openAiConfigModal('settings');
+$('#agent-model-btn').onclick = (e) => {
+  e.stopPropagation();
+  setAgentModelPopover($('#agent-model-pop').hidden);
+};
+$('#agent-model-pop').onclick = (e) => {
+  e.stopPropagation();
+  const row = e.target.closest('[data-agent-profile]');
+  if (row) { setAiProfileForPurpose('agent', row.dataset.agentProfile); setAgentModelPopover(false); return; }
+  if (e.target.closest('[data-agent-model-manage]')) { setAgentModelPopover(false); openAiConfigModal('settings'); }
+};
+document.addEventListener('click', () => setAgentModelPopover(false));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('#agent-model-pop').hidden) { setAgentModelPopover(false); $('#agent-model-btn').focus(); }
+});
 const agentProfileSelect = $('#agent-profile-select');
 if (agentProfileSelect) agentProfileSelect.onchange = (e) => setAiProfileForPurpose('agent', e.target.value);
 const translationProfileSelect = $('#translation-profile-select');
