@@ -59,8 +59,8 @@ const COMMENT_TEMPLATE_LABELS = {
 const COMMENT_SORTS = ['helpful', 'latest'];
 const DEFAULT_REWRITE_MODEL = 'deepseek-v4-flash';
 const READER_PREF_DEFAULTS = {
-  fontSize: 16.5,
-  lineHeight: 1.88,
+  fontSize: 17,
+  lineHeight: 1.86,
   measure: 70,
   font: 'default',
 };

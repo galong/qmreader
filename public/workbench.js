@@ -142,6 +142,20 @@
     $('b', next).textContent = target.titleZh || target.title || '';
   };
 
+  /* ---------- reading progress: a hairline under the bar ---------- */
+  const pane = $('#reader-pane');
+  let progressQueued = false;
+  const syncProgress = () => {
+    progressQueued = false;
+    const max = pane.scrollHeight - pane.clientHeight;
+    bar.style.setProperty('--wb-progress', max > 0 ? Math.min(1, Math.max(0, pane.scrollTop / max)).toFixed(4) : '0');
+  };
+  pane?.addEventListener('scroll', () => {
+    if (progressQueued) return;
+    progressQueued = true;
+    requestAnimationFrame(syncProgress);
+  }, { passive: true });
+
   /* ---------- crumb: keeps the source in view while scrolling ---------- */
   const crumb = $('.wb-crumb', bar);
   const syncCrumb = () => {
@@ -166,6 +180,7 @@
       syncAi();
       syncNext();
       syncCrumb();
+      syncProgress();
     });
   };
   const observer = new MutationObserver(syncAll);

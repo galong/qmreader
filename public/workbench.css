@@ -364,3 +364,124 @@ body[data-theme="light"] #app > #reader-pane { background: var(--surface); }
 #app #reader .reader-title-zh { margin-top: 6px; font-size: 14.5px; }
 #app #reader .reader-content { margin-top: 6px; }
 @media (max-width: 760px) { #app .wb-crumb { display: none; } #app .wb-modes { margin-left: 0; } }
+
+/* ================= reading experience ================= */
+/* the active list row is a paper card; no side stripe */
+#app #entry-pane .entry-card.active::before { display: none; }
+
+/* progress hairline under the bar */
+#app .wb-bar { border-bottom-color: transparent; }
+#app .wb-bar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--border-subtle);
+}
+#app .wb-bar::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: 1;
+  width: calc(var(--wb-progress, 0) * 100%);
+  height: 2px;
+  background: var(--text-0);
+  opacity: 0.55;
+}
+
+/* header: compact, the title is the first thing you read */
+#app #reader .reader-head { padding: 26px 0 18px; margin: 0 0 6px; border-bottom: 0; }
+#app #reader .reader-kicker-row { margin-bottom: 12px; }
+#app #reader #reader-title { font-size: clamp(25px, 2.1vw, 30px); font-weight: 650; line-height: 1.34; text-wrap: balance; }
+#app #reader .reader-title-zh { margin-top: 8px; font-size: 15px; line-height: 1.5; }
+#app #reader .reader-asset-badges:not(.hidden),
+#app #reader .reader-asset-summary:not(.hidden) { margin-top: 12px; }
+
+/* version header (翻译 / 改写): one slim line instead of a block */
+#app #reader .annotation-surface-panel > .reader-section-head {
+  min-height: 32px;
+  margin: 0 0 12px;
+  padding: 0;
+  border: 0;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+#app #reader .reader-section-actions { gap: 6px; }
+#app #reader .reader-section-actions .ghost-btn,
+#app #reader .reader-section-actions .asset-helpful-btn,
+#app #reader .reader-section-actions .icon-btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+#app #reader .reader-section-actions .ghost-btn.primary { background: var(--text-0); color: var(--surface); border-color: transparent; }
+#app #reader .asset-meta-line { margin: -4px 0 12px; font-size: 12px; color: var(--text-2); }
+
+/* body typography */
+#app #reader .reader-content,
+#app #reader .rewrite-content {
+  max-width: none;
+  margin-top: 4px;
+  color: var(--text-0);
+  line-height: var(--reader-line-height-effective, 1.86);
+  text-wrap: pretty;
+  overflow-wrap: break-word;
+}
+#app #reader .reader-content p,
+#app #reader .rewrite-content p { margin: 0 0 var(--reader-paragraph-gap, 1.15em); }
+#app #reader .reader-content h1, #app #reader .reader-content h2, #app #reader .reader-content h3, #app #reader .reader-content h4,
+#app #reader .rewrite-content h1, #app #reader .rewrite-content h2, #app #reader .rewrite-content h3, #app #reader .rewrite-content h4 {
+  margin: 2em 0 0.6em;
+  font-weight: 650;
+  line-height: 1.38;
+  text-wrap: balance;
+}
+#app #reader .reader-content h2, #app #reader .rewrite-content h2 { font-size: 1.28em; }
+#app #reader .reader-content h3, #app #reader .rewrite-content h3 { font-size: 1.1em; }
+#app #reader .reader-content > :first-child,
+#app #reader .rewrite-content > :first-child { margin-top: 0; }
+#app #reader .reader-content img,
+#app #reader .rewrite-content img { display: block; max-width: 100%; height: auto; margin: 1.5em 0; border-radius: 10px; }
+#app #reader .reader-content figure,
+#app #reader .rewrite-content figure { margin: 1.6em 0; }
+#app #reader .reader-content figure img,
+#app #reader .rewrite-content figure img { margin: 0 0 0.6em; }
+#app #reader .reader-content figcaption,
+#app #reader .rewrite-content figcaption { color: var(--text-2); font-size: 0.82em; line-height: 1.55; text-align: center; }
+#app #reader .reader-content blockquote,
+#app #reader .rewrite-content blockquote {
+  margin: 1.5em 0;
+  padding: 0.9em 1.15em;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bg-2);
+  color: var(--text-1);
+}
+#app #reader .reader-content blockquote p:last-child,
+#app #reader .rewrite-content blockquote p:last-child { margin-bottom: 0; }
+#app #reader .reader-content ul, #app #reader .reader-content ol,
+#app #reader .rewrite-content ul, #app #reader .rewrite-content ol { margin: 0 0 var(--reader-paragraph-gap, 1.15em); padding-left: 1.4em; }
+#app #reader .reader-content li + li,
+#app #reader .rewrite-content li + li { margin-top: 0.35em; }
+#app #reader .reader-content pre,
+#app #reader .rewrite-content pre { margin: 1.5em 0; border-radius: 10px; font-size: 0.8em; line-height: 1.65; }
+#app #reader .reader-content a,
+#app #reader .rewrite-content a { text-underline-offset: 0.2em; }
+
+/* what lives below the article is secondary */
+#app #reader .reader-annotations,
+#app #reader .reader-comments { margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--border-subtle); }
+#app #reader .reader-annotations > .reader-section-head,
+#app #reader .reader-comments > .reader-section-head { color: var(--text-1); font-size: 13px; font-weight: 600; }
+#app .wb-next { margin-top: 36px; }
+#app #reader { padding-bottom: 96px; }
+
+/* table of contents: a quiet disclosure, not a box */
+#app #reader .reader-toc:not(.hidden) { margin: 0 0 14px; padding: 0; border: 0; background: transparent; }
+#app #reader .reader-toc > summary { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 0; color: var(--text-2); font-size: 12.5px; cursor: pointer; }
+#app #reader .reader-toc > summary:hover { color: var(--text-0); }
