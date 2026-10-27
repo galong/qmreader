@@ -541,3 +541,84 @@ body[data-theme="light"] #app > #reader-pane { background: var(--surface); }
 #app .wb-actions > .wb-toc-btn[aria-pressed="true"] { background: rgba(17, 17, 17, 0.07); }
 @media (max-width: 760px) { #app .wb-bar > #reader-toc { right: 8px; } }
 #app .wb-bar > #reader-toc > summary { display: none; }
+
+/* ---------- round 4 ---------- */
+/* the article page leads with the title: source/author/date/visits are redundant */
+#app #reader .reader-kicker-row { display: none; }
+#app #reader .reader-head { padding: 22px 0 6px; margin: 0; }
+#app #reader .reader-title-row { margin: 0; }
+#app #reader .reader-content > :first-child,
+#app #reader .rewrite-content > :first-child { margin-top: 14px; }
+
+/* the reading surface stays paper-white even when the list is collapsed */
+#app #reader-pane { background: var(--surface); }
+
+/* mode switch aligns with the title; crumb follows it, actions go right */
+#app .wb-modes { order: 1; margin-left: 0; }
+#app .wb-crumb { order: 2; flex: 1; max-width: none; margin-left: 4px; }
+#app .wb-actions { order: 3; margin-left: auto; }
+
+/* copy / font settings live on the bar as icon buttons */
+#app .wb-actions .wb-icon-only .button-label { display: none; }
+#app .wb-actions .wb-icon-only {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  justify-content: center;
+}
+#app .wb-aa { font-size: 14px; font-weight: 650; letter-spacing: -0.02em; line-height: 1; }
+#app .wb-prefs-wrap { position: relative; display: flex; }
+#app .wb-prefs-wrap #reader-preferences {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: -40px;
+  z-index: 22;
+  width: min(332px, 92vw);
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.14);
+}
+#app .wb-prefs-wrap #reader-preferences.hidden { display: none; }
+#app .reader-pref-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; font-size: 12px; color: var(--text-2); }
+#app .reader-pref-head strong { font-weight: 500; }
+#app .wb-pref-reset { border: 0; background: transparent; color: var(--text-2); font-size: 12px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+#app .wb-pref-reset:hover { color: var(--text-0); }
+#app .wb-prefs-ui { display: flex; flex-direction: column; gap: 8px; }
+#app .wb-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+#app .wb-chips button,
+#app .wb-seg button {
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+#app .wb-chips button[aria-pressed="true"] { background: var(--surface); border-color: var(--text-0); color: var(--text-0); font-weight: 600; }
+#app .wb-pref-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: center; }
+#app .wb-seg { display: flex; gap: 2px; padding: 2px; background: var(--bg-2); border-radius: 9px; }
+#app .wb-seg button { flex: 1; height: 28px; padding: 0 4px; background: transparent; border-radius: 7px; font-size: 12px; }
+#app .wb-seg button[aria-pressed="true"] { background: var(--surface); color: var(--text-0); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+#app .wb-size-slot .reader-pref-group { display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 2px; background: var(--bg-2); border-radius: 9px; }
+#app .wb-size-slot .reader-pref-icon { width: 30px; height: 28px; border: 0; border-radius: 7px; background: transparent; color: var(--text-1); }
+#app .wb-size-slot .reader-pref-icon:hover { background: var(--surface); }
+#app .wb-size-slot .reader-pref-value { font-size: 13px; font-weight: 600; color: var(--text-0); }
+
+/* thin scrollbar that only shows while scrolling */
+#app #reader-pane { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+#app #reader-pane.wb-scrolling { scrollbar-color: rgba(120, 120, 120, 0.45) transparent; }
+#app #reader-pane::-webkit-scrollbar { width: 8px; }
+#app #reader-pane::-webkit-scrollbar-thumb { background: transparent; border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+#app #reader-pane.wb-scrolling::-webkit-scrollbar-thumb { background-color: rgba(120, 120, 120, 0.45); }
+@media (max-width: 760px) { #app .wb-prefs-wrap #reader-preferences { right: -90px; } }
+#app .reader-pref-grid { display: block; }
+#app .wb-prefs-ui { width: 100%; }
+#app .wb-chips button, #app .wb-seg button { min-width: 0; white-space: nowrap; padding: 0 4px; }
+#app .wb-prefs-ui .reader-pref-group { width: 100%; }
+/* the collapsed / immersive vignette made the page edges grey: keep it plain paper */
+#app.reading.left-collapsed #reader-pane,
+#app.reading.agent-collapsed #reader-pane,
+#app.reader-immersive #reader-pane { background: var(--surface); }

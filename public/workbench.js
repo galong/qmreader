@@ -49,6 +49,20 @@
   tocBtn.setAttribute('aria-controls', 'reader-toc');
   actions.appendChild(tocBtn);
   actions.appendChild(aiBtn);
+  // Copy and font settings are used often enough to sit on the bar, icon only.
+  const copyBtn = $('#reader-copy-link');
+  const prefsBtn = $('#reader-prefs-toggle');
+  if (copyBtn) {
+    copyBtn.classList.add('wb-icon-only');
+    actions.appendChild(copyBtn);
+  }
+  const prefsWrap = make('div', 'wb-prefs-wrap');
+  if (prefsBtn) {
+    prefsBtn.classList.add('wb-icon-only');
+    prefsBtn.innerHTML = '<span class="wb-aa" aria-hidden="true">Aa</span><span class="button-label">字体</span>';
+    prefsWrap.appendChild(prefsBtn);
+  }
+  actions.appendChild(prefsWrap);
   if (immersive) actions.appendChild(immersive);
 
   // Secondary actions live in one menu; the nodes are moved, not copied.
@@ -62,7 +76,7 @@
   const menu = make('div', 'wb-menu hidden');
   menu.setAttribute('role', 'menu');
   menu.id = 'wb-more-menu';
-  ['#reader-open-original', '#reader-like', '#reader-copy-link', '#reader-prefs-toggle', '#reader-delete'].forEach(sel => {
+  ['#reader-open-original', '#reader-like', '#reader-delete'].forEach(sel => {
     const node = $(sel);
     if (node) menu.appendChild(node);
   });
@@ -71,7 +85,7 @@
   actions.appendChild(moreWrap);
   // The font panel sits beside the menu so the menu can close while it is open.
   const prefs = $('#reader-preferences');
-  if (prefs) moreWrap.appendChild(prefs);
+  if (prefs) prefsWrap.appendChild(prefs);
 
   const setMenu = open => {
     menu.classList.toggle('hidden', !open);
@@ -91,6 +105,60 @@
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !menu.classList.contains('hidden')) { setMenu(false); moreBtn.focus(); }
   });
+
+  /* ---------- reading settings: chips and segments (same state as the old controls) ---------- */
+  const FONT_CHIPS = [['default', '默认混排'], ['pingfang', '苹方黑体'], ['hei', '系统黑体'], ['song', '宋体'], ['kai', '楷体'], ['serif', '衬线'], ['mono', '等宽']];
+  const LINE_SEGS = [[1.7, '紧凑'], [1.86, '适中'], [2.02, '宽松']];
+  const WIDTH_SEGS = [[60, '窄栏'], [70, '标准栏'], [80, '宽栏']];
+  if (prefs) {
+    const legacy = make('div', 'wb-prefs-legacy');
+    legacy.hidden = true;
+    $$('.reader-pref-grid > .reader-pref-label, .reader-pref-select-label', prefs).forEach(n => legacy.appendChild(n));
+    const seg = (group, items) => `<div class="wb-seg" role="group" data-pref="${group}">${items.map(([v, l]) => `<button type="button" data-v="${v}">${l}</button>`).join('')}</div>`;
+    const grid = $('.reader-pref-grid', prefs);
+    const head = $('.reader-pref-head', prefs);
+    if (head) head.innerHTML = '<strong>阅读设置</strong><button type="button" class="wb-pref-reset">恢复默认</button>';
+    const sizeGroup = $('.reader-pref-group', prefs);
+    const ui = make('div', 'wb-prefs-ui', `
+      <div class="wb-chips" role="group" aria-label="阅读字体" data-pref="font">${FONT_CHIPS.map(([v, l]) => `<button type="button" data-v="${v}">${l}</button>`).join('')}</div>
+      <div class="wb-pref-row"><div class="wb-size-slot"></div>${seg('lineHeight', LINE_SEGS)}</div>
+      ${seg('measure', WIDTH_SEGS)}`);
+    $('.wb-size-slot', ui).appendChild(sizeGroup);
+    grid.textContent = '';
+    grid.append(ui, legacy);
+    const setPref = (name, value) => { if (typeof setReaderPref === 'function') setReaderPref(name, value); syncPrefs(); };
+    function syncPrefs() {
+      const p = (typeof state !== 'undefined' && state.readerPrefs) || {};
+      $$('[data-pref]', prefs).forEach(group => {
+        const name = group.dataset.pref;
+        const cur = Number(p[name]);
+        const items = $$('button', group);
+        let best = null;
+        items.forEach(b => {
+          const v = b.dataset.v;
+          const on = name === 'font' ? p.font === v : Math.abs(Number(v) - cur) < (name === 'lineHeight' ? 0.09 : 5);
+          if (on && (!best || (name !== 'font' && Math.abs(Number(v) - cur) < Math.abs(Number(best.dataset.v) - cur)))) best = b;
+        });
+        items.forEach(b => b.setAttribute('aria-pressed', b === best ? 'true' : 'false'));
+      });
+    }
+    prefs.addEventListener('click', event => {
+      const b = event.target.closest('[data-v]');
+      if (b) {
+        const name = b.closest('[data-pref]').dataset.pref;
+        setPref(name, name === 'font' ? b.dataset.v : Number(b.dataset.v));
+        return;
+      }
+      if (event.target.closest('.wb-pref-reset') && typeof READER_PREF_DEFAULTS !== 'undefined') {
+        Object.entries(READER_PREF_DEFAULTS).forEach(([k, v]) => setReaderPref(k, v));
+        syncPrefs();
+      } else if (event.target.closest('#reader-font-size-down, #reader-font-size-up')) {
+        setTimeout(syncPrefs, 0);
+      }
+    });
+    prefsBtn?.addEventListener('click', () => setTimeout(syncPrefs, 0));
+    syncPrefs();
+  }
 
   /* ---------- table of contents: a popover on the bar, not a row in the page ---------- */
   const toc = $('#reader-toc');
@@ -233,6 +301,15 @@
     }
     if (crumb.textContent !== name) crumb.textContent = name;
   };
+
+  /* scrollbar only shows while the pane is scrolling */
+  const scrollPane = $('#reader-pane');
+  let scrollTimer = 0;
+  scrollPane?.addEventListener('scroll', () => {
+    scrollPane.classList.add('wb-scrolling');
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => scrollPane.classList.remove('wb-scrolling'), 900);
+  }, { passive: true });
 
   /* ---------- keep everything in sync ---------- */
   let queued = false;
