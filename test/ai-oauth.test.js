@@ -332,3 +332,29 @@ test('account requests remain private BYOK when the website gateway is configure
   assert.equal(config.model, 'selected-model');
   assert.throws(() => deepseek.getConfig({ provider: 'codex-account' }), /登录/);
 });
+
+test('OpenCode Go requests carry a stable per-conversation session id and a client user agent', async () => {
+  const opencode = withFetch(() => jsonResponse({ choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }] }));
+  try {
+    const config = deepseek.getConfig({
+      provider: 'opencode-go', providerType: 'openai_compatible', apiKey: 'oc-key', model: 'deepseek-v4.1-flash',
+      baseUrl: 'https://opencode.ai/zen/go/v1',
+    });
+    const opening = [{ role: 'system', content: 'sys' }, { role: 'user', content: 'article A' }];
+    await deepseek.__test.postChatCompletion(config, { messages: [...opening, { role: 'user', content: 'q1' }] });
+    await deepseek.__test.postChatCompletion(config, { messages: [...opening, { role: 'user', content: 'q1' }, { role: 'assistant', content: 'a1' }, { role: 'user', content: 'q2' }] });
+    await deepseek.__test.postChatCompletion(config, { messages: [{ role: 'system', content: 'sys' }, { role: 'user', content: 'article B' }] });
+    const sessions = opencode.calls.map(call => call.init.headers['x-opencode-session']);
+    assert.match(sessions[0], /^qmr-[0-9a-f]{32}$/);
+    assert.equal(sessions[1], sessions[0]);
+    assert.notEqual(sessions[2], sessions[0]);
+    assert.match(opencode.calls[0].init.headers['User-Agent'], /^qmreader\//);
+  } finally { opencode.restore(); }
+
+  const other = withFetch(() => jsonResponse({ choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }] }));
+  try {
+    const config = deepseek.getConfig({ provider: 'custom', providerType: 'openai_compatible', apiKey: 'k', model: 'm', baseUrl: 'https://api.example.com/v1' });
+    await deepseek.__test.postChatCompletion(config, { messages: [{ role: 'user', content: 'x' }] });
+    assert.equal(other.calls[0].init.headers['x-opencode-session'], undefined);
+  } finally { other.restore(); }
+});
