@@ -649,4 +649,4 @@ body[data-theme="light"] #app > #reader-pane { background: var(--surface); }
 
 #app .entry-card.read .entry-summary { opacity: 1; }
 
-#app #sidebar .brand .brand-home { gap: 6px; }
+#app #sidebar .brand .brand-home { gap: 4px; }
