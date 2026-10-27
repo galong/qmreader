@@ -59,20 +59,28 @@ const COMMENT_TEMPLATE_LABELS = {
 const COMMENT_SORTS = ['helpful', 'latest'];
 const DEFAULT_REWRITE_MODEL = 'deepseek-flash';
 const READER_PREF_DEFAULTS = {
-  fontSize: 16.5,
-  lineHeight: 1.88,
+  fontSize: 17,
+  lineHeight: 1.9,
   measure: 70,
   font: 'default',
 };
 const READER_FONTS = {
-  default: '默认混排',
-  pingfang: '苹方黑体',
-  song: '宋体',
-  kai: '楷体',
-  serif: '衬线',
-  mono: '等宽',
-  hei: '系统黑体',
+  default: '系统默认',
+  sans: '思源黑体',
+  serif: '思源宋体',
+  kai: '霞鹜文楷',
 };
+// Older saved choices map onto the four fonts that remain.
+const READER_FONT_ALIASES = { pingfang: 'default', hei: 'default', mono: 'default', song: 'serif' };
+// Web fonts load only when chosen (same mirrors as lex.qiaomu.ai, reachable from mainland China).
+const READER_FONT_STYLESHEETS = {
+  sans: 'https://fonts.googleapis.cn/css2?family=Noto+Sans+SC:wght@400;600&display=swap',
+  serif: 'https://fonts.googleapis.cn/css2?family=Noto+Serif+SC:wght@400;600&display=swap',
+  kai: 'https://cdn.jsdelivr.net/npm/lxgw-wenkai-screen-webfont@1.7.0/lxgwwenkaiscreen.css',
+};
+const READER_LINE_HEIGHTS = [1.7, 1.9, 2.1];
+const READER_MEASURES = [60, 70, 80];
+const READER_PAPERS = ['light', 'sepia', 'dark'];
 const AI_READING_TASKS = [
   {
     group: '理解',
@@ -321,6 +329,13 @@ const AI_PROVIDER_PRESETS = [
     description: 'Cloudflare 官方 Workers AI，Base URL 里的 <ACCOUNT_ID> 需替换为你的账号 ID。',
   },
 ];
+// Extra platforms, account sign-in and key detection live in /ai-providers.js.
+if (window.QMAiProviders) {
+  const known = new Set(AI_PROVIDER_PRESETS.map(preset => preset.id));
+  for (const preset of QMAiProviders.presets) if (!known.has(preset.id)) AI_PROVIDER_PRESETS.push(preset);
+  for (const preset of AI_PROVIDER_PRESETS) if (QMAiProviders.signInForExisting[preset.id]) preset.signIn = QMAiProviders.signInForExisting[preset.id];
+  AI_PROVIDER_CATEGORIES.unshift(QMAiProviders.ACCOUNT);
+}
 const AI_PROVIDER_MAP = Object.fromEntries(AI_PROVIDER_PRESETS.map(preset => [preset.id, preset]));
 const DEFAULT_AI_PRESET_ID = 'deepseek';
 
@@ -462,7 +477,7 @@ function rewriteUiCopy(entry = state.activeEntry) {
     };
   }
   return {
-    tab: '中文改写',
+    tab: '中文',
     section: '中文改写',
     asset: '中文改写',
     action: '生成',
@@ -545,6 +560,7 @@ function createProfileFromPreset(presetId = DEFAULT_AI_PRESET_ID, overrides = {}
     temperature: 0.7,
     maxTokens: 2000,
     apiKey: '',
+    oauthAccountId: '',
     isDefault: false,
     createdAt: now,
     updatedAt: now,
@@ -591,6 +607,7 @@ function normalizeProfile(raw, index = 0) {
     temperature: clampTemperature(raw && raw.temperature),
     maxTokens: clampMaxTokens(raw && (raw.maxTokens || raw.max_tokens)),
     apiKey: String(raw && (raw.apiKey || raw.api_key) || '').trim(),
+    oauthAccountId: String(raw && raw.oauthAccountId || '').trim(),
     isDefault: hasDefaultFlag ? Boolean(raw.isDefault || raw.is_default) : index === 0,
     createdAt: Number(raw && raw.createdAt) || Date.now(),
     updatedAt: Number(raw && raw.updatedAt) || Date.now(),
@@ -717,7 +734,7 @@ const state = {
   personaAgentEntryId: '',
   personaAgentMessageKey: '',
   personaAgentReady: false,
-  agentCollapsed: storage.getItem('qm_agent_collapsed') === '1',
+  agentCollapsed: storage.getItem('qm_agent_open') !== '1', // AI companion opens on demand; the old qm_agent_collapsed key is ignored
   agentAutoCollapsed: false,
   sidebarCollapsed: storage.getItem('qm_sidebar_collapsed') === '1',
   leftCollapsed: storage.getItem('qm_left_collapsed') === '1',
@@ -1691,6 +1708,7 @@ function configFromProfile(profile) {
     providerName: profile.providerName || profile.name || profile.provider || 'AI',
     providerType: profile.providerType || 'openai_compatible',
     apiKey: String(profile.apiKey || '').trim(),
+    oauthAccountId: String(profile.oauthAccountId || '').trim(),
     baseUrl: normalizeBaseUrl(profile.baseUrl),
     model: String(profile.model || '').trim(),
     temperature: clampTemperature(profile.temperature),
@@ -1707,7 +1725,7 @@ function aiConfigForPurpose(purpose = '') {
 }
 
 function hasUsableAiConfig(config = currentAiConfig()) {
-  return Boolean(config.apiKey && config.baseUrl && config.model);
+  return Boolean((config.apiKey || config.oauthAccountId) && config.baseUrl && config.model);
 }
 
 function aiHeaderValue(value, fallback = '') {
@@ -1719,6 +1737,16 @@ function aiHeaderValue(value, fallback = '') {
 }
 
 function aiHeadersFromConfig(config) {
+  if (!String(config.apiKey || '').trim() && config.oauthAccountId) {
+    // Account sign-in: only the account id travels; tokens and endpoint stay on the server.
+    return {
+      'X-AI-Provider': aiHeaderValue(config.provider, 'custom'),
+      'X-AI-OAuth-Account': aiHeaderValue(config.oauthAccountId),
+      'X-AI-Model': aiHeaderValue(config.model),
+      'X-AI-Temperature': String(config.temperature ?? ''),
+      'X-AI-Max-Tokens': String(config.maxTokens ?? ''),
+    };
+  }
   if (!String(config.apiKey || '').trim()) return {};
   return {
     'X-AI-Provider': aiHeaderValue(config.provider, 'custom'),
@@ -4025,6 +4053,18 @@ function listSkeletonHtml(rows = 6) {
 }
 
 // UI-LIST: drop boilerplate labels such as "📌 一句话摘要" so the list shows the summary itself.
+// One line under the title, in the same language as the title: an English
+// teaser under a Chinese title is noise, and so is a summary that repeats it.
+function entryCardSummary(entry) {
+  const text = listSummaryText(entry.summaryZh || entry.summary);
+  if (!text) return '';
+  const hasCjk = /[\u3400-\u9fff]/.test(text);
+  if (entry.titleZh && !hasCjk) return '';
+  const title = normalizeSearchText(entry.titleZh || entry.title);
+  if (title && normalizeSearchText(text).startsWith(title.slice(0, 24))) return '';
+  return text;
+}
+
 function listSummaryText(summary) {
   return String(summary || '').replace(/^\s*(?:📌\s*)?(?:一句话摘要|摘要|TL;?DR)\s*[:：]?\s*/i, '').trim();
 }
@@ -4108,18 +4148,9 @@ function renderList() {
   const frag = document.createDocumentFragment();
   for (const e of visibleList) {
     const src = sourceById(e.sourceId);
-    const assetsHtml = assetBadgesHtml(e, { interactive: true });
-    const entryActivity = assetActivityLabel(e) || entryHistoryLabel(e) || hotEntryLabel(e);
-    const statsLine = entryStatsLabel(e);
-    const podcastFacts = String(e.sourceId || '').startsWith('podscribe-')
-      ? [Number.isSafeInteger(e.podcastViews) ? `原站浏览 ${formatCompactCount(e.podcastViews) || '0'}` : '',
-        e.podcastDurationSeconds > 0 ? `时长 ${Math.round(e.podcastDurationSeconds / 60)} 分钟` : '',
-        e.podcastWordCount > 0 ? `${formatCompactCount(e.podcastWordCount)} 词` : ''].filter(Boolean).join(' · ') : '';
-    const metaRow = [podcastFacts ? `<span class="entry-stats">${escapeHtml(podcastFacts)}</span>` : '', statsLine ? `<span class="entry-stats">${escapeHtml(statsLine)}</span>` : '', assetsHtml ? `<span class="asset-badges entry-asset-badges">${assetsHtml}</span>` : ''].filter(Boolean).join('');
-    const assetPreview = assetPreviewForEntry(e);
-    const assetItems = assetItemListHtml(e);
     const publishedLabel = e.publishedTs ? timeAgo(e.publishedTs) : podcastRelativeDateLabel(e.publishedRelative);
     const sourceName = src ? src.name : e.sourceId;
+    const summaryText = entryCardSummary(e);
     const card = document.createElement('div');
     card.className = 'entry-card' + (state.read.has(e.id) ? ' read' : '') + (state.activeEntry?.id === e.id ? ' active' : '');
     card.dataset.id = e.id;
@@ -4139,11 +4170,7 @@ function renderList() {
           ${state.starred.has(e.id) ? `<span class="entry-star">${lucideIcon('star')}</span>` : ''}
         </div>
         <div class="entry-title">${escapeHtml(e.titleZh || e.title)}</div>
-        ${e.titleZh ? `<div class="entry-original">${escapeHtml(e.title)}</div>` : ''}
-        ${listSummaryText(e.summary) ? `<div class="entry-summary">${escapeHtml(listSummaryText(e.summary))}</div>` : ''}
-        ${metaRow ? `<div class="entry-meta-row">${metaRow}</div>` : ''}
-        ${assetItems || (assetPreview ? assetPreviewHtml(assetPreview) : '')}
-        ${entryActivity ? `<div class="entry-asset-activity">${escapeHtml(entryActivity)}</div>` : ''}
+        ${summaryText ? `<div class="entry-summary">${escapeHtml(summaryText)}</div>` : ''}
       </div>
       ${e.image ? `<div class="entry-media"><img class="entry-thumb" src="${escapeHtml(e.image)}" alt="" loading="lazy" decoding="async" onerror="this.closest('.entry-media')?.remove()" /></div>` : ''}`;
     card.onclick = (event) => {
@@ -4538,13 +4565,43 @@ function clampNumber(value, min, max, fallback) {
 
 function normalizeReaderPrefs(raw = {}) {
   const prefs = raw && typeof raw === 'object' ? raw : {};
-  const font = READER_FONTS[prefs.font] ? prefs.font : READER_PREF_DEFAULTS.font;
+  const requestedFont = READER_FONT_ALIASES[prefs.font] || prefs.font;
+  const font = READER_FONTS[requestedFont] ? requestedFont : READER_PREF_DEFAULTS.font;
   return {
-    fontSize: clampNumber(prefs.fontSize, 15, 20, READER_PREF_DEFAULTS.fontSize),
-    lineHeight: clampNumber(prefs.lineHeight, 1.65, 2.05, READER_PREF_DEFAULTS.lineHeight),
-    measure: clampNumber(prefs.measure, 56, 84, READER_PREF_DEFAULTS.measure),
+    fontSize: clampNumber(prefs.fontSize, 14, 24, READER_PREF_DEFAULTS.fontSize),
+    lineHeight: nearestStep(clampNumber(prefs.lineHeight, 1.6, 2.2, READER_PREF_DEFAULTS.lineHeight), READER_LINE_HEIGHTS),
+    measure: nearestStep(clampNumber(prefs.measure, 56, 84, READER_PREF_DEFAULTS.measure), READER_MEASURES),
     font,
   };
+}
+
+function nearestStep(value, steps) {
+  return steps.reduce((best, step) => (Math.abs(step - value) < Math.abs(best - value) ? step : best), steps[0]);
+}
+
+function loadReaderFont(font) {
+  const href = READER_FONT_STYLESHEETS[font];
+  if (!href || document.getElementById(`qm-reader-font-${font}`)) return;
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = href;
+  link.id = `qm-reader-font-${font}`;
+  document.head.appendChild(link);
+}
+
+function currentReaderPaper() {
+  if (document.body.dataset.theme === 'dark') return 'dark';
+  return document.body.dataset.paper === 'sepia' ? 'sepia' : 'light';
+}
+
+function setReaderPaper(paper) {
+  const next = READER_PAPERS.includes(paper) ? paper : 'light';
+  document.body.dataset.theme = next === 'dark' ? 'dark' : 'light';
+  if (next === 'sepia') document.body.dataset.paper = 'sepia';
+  else delete document.body.dataset.paper;
+  storage.setItem('fr_theme', document.body.dataset.theme);
+  storage.setItem('qm_paper', next === 'sepia' ? 'sepia' : '');
+  renderReaderPrefs();
 }
 
 function persistReaderPrefs() {
@@ -4629,6 +4686,7 @@ function applyReaderPrefs() {
   document.documentElement.style.setProperty('--reader-font-size', `${prefs.fontSize}px`);
   document.documentElement.style.setProperty('--reader-line-height', prefs.lineHeight.toFixed(2));
   if (reader) reader.dataset.readerFont = prefs.font;
+  loadReaderFont(prefs.font);
   if (app) app.classList.toggle('reader-immersive', Boolean(state.readerImmersive && state.activeEntry));
   updateReaderLanguageProfile();
   renderLeftCollapseToggle();
@@ -4648,23 +4706,17 @@ function renderReaderPrefs() {
   if (immersive) {
     immersive.classList.toggle('active', Boolean(state.readerImmersive));
     immersive.setAttribute('aria-pressed', state.readerImmersive ? 'true' : 'false');
-    setButtonIconLabel(immersive, state.readerImmersive ? 'minimize-2' : 'maximize-2', '沉浸阅读');
+    setButtonIconLabel(immersive, state.readerImmersive ? 'minimize-2' : 'maximize-2', state.readerImmersive ? '退出沉浸' : '沉浸阅读');
     immersive.title = state.readerImmersive ? '退出沉浸阅读' : '沉浸阅读';
   }
   const fontSizeValue = $('#reader-font-size-value');
   if (fontSizeValue) fontSizeValue.textContent = prefs.fontSize.toFixed(prefs.fontSize % 1 ? 1 : 0);
-  const lineHeight = $('#reader-line-height');
-  if (lineHeight) {
-    lineHeight.value = prefs.lineHeight.toFixed(2);
-    lineHeight.title = `行高 ${prefs.lineHeight.toFixed(2)}`;
-  }
-  const measure = $('#reader-measure');
-  if (measure) {
-    measure.value = String(Math.round(prefs.measure));
-    measure.title = `栏宽 ${Math.round(prefs.measure)}ch`;
-  }
-  const font = $('#reader-font-family');
-  if (font) font.value = prefs.font;
+  const current = { ...prefs, paper: currentReaderPaper() };
+  $$('#reader-preferences [data-pref]').forEach(btn => {
+    const on = String(current[btn.dataset.pref]) === btn.dataset.value;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
 }
 
 function setReaderPrefsOpen(open) {
@@ -4731,7 +4783,7 @@ function visibleAgentPrompts() {
 function renderAgentPrompts() {
   const wrap = $('.agent-prompts');
   if (!wrap) return;
-  const prompts = visibleAgentPrompts().slice(0, 5);
+  const prompts = visibleAgentPrompts().slice(0, 3);
   wrap.innerHTML = `
     <div class="agent-prompt-row" role="list">
       ${prompts.map(item => `
@@ -5320,31 +5372,18 @@ function renderAgentContextStrip() {
     el.innerHTML = '<span>未选择文章</span>';
     return;
   }
-  const assets = mergeAssets(entry);
-  const stats = entryStats(entry);
-  const parts = [
-    ['上下文', '当前文章'],
-    state.agentContext ? ['引用', agentContextTitle(state.agentContext)] : null,
-    ['划线', formatCompactCount((state.annotations || []).length) || '0'],
-    ['点评', formatCompactCount((state.comments || []).length) || '0'],
-    ['对话', formatCompactCount((state.agentMessages || []).length) || '0'],
-  ].filter(Boolean);
-  if (assets.latestAt) parts.push(['资产', formatAssetTime(assets.latestAt)]);
-  if (stats.viewCount) parts.push(['访问', formatCompactCount(stats.viewCount)]);
-  el.innerHTML = parts.map(([label, value]) => `
-    <span class="agent-context-chip"><em>${escapeHtml(label)}</em>${escapeHtml(value)}</span>
-  `).join('');
+  const chars = elementTextForCopy(readerLanguageRoot(state.readerTab)).length;
+  el.textContent = chars ? `基于本文（${formatCompactCount(chars)} 字）回答` : '基于本文回答';
 }
 
 function agentEmptyHtml(kind = 'empty') {
   const hasArticle = Boolean(state.activeEntry);
-  const title = !hasArticle ? '先选择一篇文章' : kind === 'busy' ? '正在组织回答' : '问我关于这篇文章的任何问题';
+  const title = !hasArticle ? '先选择一篇文章' : kind === 'busy' ? '正在组织回答' : '读到哪里，问到哪里';
   const note = !hasArticle
-    ? '在中间列表点开文章，我会读完全文再回答你。'
-    : '点下方的快捷任务，或直接输入问题后按 Enter 发送。关键事实请回到原文核查。';
+    ? '点开文章后，我会读完全文再回答。'
+    : '选中正文里的一段可以单独问。关键事实请回原文核对。';
   return `
     <div class="agent-empty agent-empty-state">
-      <div class="agent-empty-mark">AI</div>
       <strong>${escapeHtml(title)}</strong>
       <p>${escapeHtml(note)}</p>
     </div>`;
@@ -5564,6 +5603,7 @@ function setReaderTab(tab, { syncUrl = true, replaceUrl = true } = {}) {
   updateReaderTocVisibility(next);
   updateReaderLanguageProfile();
   applyTextAnnotations();
+  renderAgentContextStrip();
   if (syncUrl) syncReaderUrl({ replace: replaceUrl });
 }
 
@@ -5877,6 +5917,8 @@ function renderRewrite(rewrite) {
   copy.classList.toggle('hidden', !rewrite || !rewrite.body);
   copy.disabled = !rewrite || !rewrite.body;
   renderAssetHelpfulButton('rewrite', state.rewrite);
+  // Readers get the Chinese version automatically; regenerating stays an admin tool.
+  if (action) action.classList.toggle('hidden', Boolean(rewrite && rewrite.body) && !isAdmin());
   if (!rewrite || !rewrite.body) {
     empty.classList.remove('hidden');
     if (meta) {
@@ -8006,6 +8048,7 @@ function renderAgentMessages(extraPending = false, { preserveScroll = false } = 
   if (!el) return;
   renderAgentContextStrip();
   const thread = state.agentMessages || [];
+  $('#agent-side-panel')?.classList.toggle('agent-has-thread', Boolean(thread.length || extraPending));
   const hadPendingChatMessage = Boolean(state.pendingChatMessageId);
   const previousScrollTop = el.scrollTop;
   el.innerHTML = '';
@@ -8022,7 +8065,8 @@ function renderAgentMessages(extraPending = false, { preserveScroll = false } = 
   const messages = extraPending ? [...thread, { role: 'assistant', content: '思考中…', pending: true }] : thread;
   for (const message of messages) {
     const row = document.createElement('div');
-    row.className = `agent-msg ${message.role}${message.pending ? ' pending' : ''}`;
+    const mine = message.role === 'user' && (message.canDelete || !message.id || (state.me && message.contributorId === state.me.id));
+    row.className = `agent-msg ${message.role}${message.pending ? ' pending' : ''}${mine ? ' mine' : ''}`;
     if (message.id) row.id = `chat-${message.id}`;
     const head = document.createElement('div');
     head.className = 'agent-msg-head';
@@ -8049,32 +8093,14 @@ function renderAgentMessages(extraPending = false, { preserveScroll = false } = 
     if (!message.pending) {
       const actions = document.createElement('div');
       actions.className = 'agent-msg-actions';
-      if (message.id) {
-        const link = document.createElement('button');
-        link.type = 'button';
-        link.className = 'agent-msg-action agent-msg-link';
-        link.title = '复制这条对话链接';
-        link.setAttribute('aria-label', '复制这条对话链接');
-        setElementIcon(link, 'hash');
-        link.onclick = () => copyAgentMessageLink(message.id);
-        actions.appendChild(link);
-      }
       const copy = document.createElement('button');
       copy.type = 'button';
       copy.className = 'agent-msg-action agent-msg-copy';
       copy.title = '复制这条消息';
       copy.setAttribute('aria-label', '复制这条消息');
-      setElementIcon(copy, 'copy');
+      setButtonIconLabel(copy, 'copy', '复制');
       copy.onclick = () => copyText(message.content, '消息已复制');
       actions.appendChild(copy);
-      const draft = document.createElement('button');
-      draft.type = 'button';
-      draft.className = 'agent-msg-action agent-msg-draft';
-      draft.title = '放入人工点评';
-      draft.setAttribute('aria-label', '放入人工点评');
-      setElementIcon(draft, 'message-circle-plus');
-      draft.onclick = () => draftCommentFromAgentMessage(message);
-      actions.appendChild(draft);
       if (message.canDelete && message.id) {
         const del = document.createElement('button');
         del.type = 'button';
@@ -8092,20 +8118,6 @@ function renderAgentMessages(extraPending = false, { preserveScroll = false } = 
     body.innerHTML = renderMarkdownLite(message.content);
     row.appendChild(head);
     row.appendChild(body);
-    if (!message.pending && message.id) {
-      const feedback = document.createElement('div');
-      feedback.className = 'agent-msg-feedback';
-      const helpfulCount = Number(message.helpfulCount || 0);
-      const helpful = document.createElement('button');
-      helpful.type = 'button';
-      helpful.className = `agent-msg-helpful${message.helpfulByMe ? ' active' : ''}`;
-      helpful.setAttribute('aria-pressed', message.helpfulByMe ? 'true' : 'false');
-      helpful.title = message.helpfulByMe ? '取消有用标记' : '标记这条对话有用';
-      helpful.textContent = `有用${helpfulCount ? ` ${helpfulCount}` : ''}`;
-      helpful.onclick = () => toggleAgentHelpful(message.id);
-      feedback.appendChild(helpful);
-      footer.appendChild(feedback);
-    }
     if (footer.childElementCount) row.appendChild(footer);
     frag.appendChild(row);
   }
@@ -9375,7 +9387,7 @@ function renderAiStatus() {
 function aiProfileSelectLabel(profile) {
   const model = String(profile && profile.model || '').trim();
   const name = String(profile && profile.name || profile && profile.providerName || 'AI 配置').trim();
-  const suffix = profile && profile.apiKey ? '' : ' · 未配置';
+  const suffix = profile && (profile.apiKey || profile.oauthAccountId) ? '' : ' · 未配置';
   return `${name}${model ? ` · ${model}` : ''}${suffix}`;
 }
 
@@ -9427,7 +9439,7 @@ function renderAiProfileList() {
     btn.innerHTML = `
       <span class="ai-profile-name">${escapeHtml(profile.name)}</span>
       <span class="ai-profile-meta">${escapeHtml(profile.providerName || profile.provider)} · ${escapeHtml(profile.model || '未填模型')}</span>
-      <span class="ai-profile-key">${profile.apiKey ? escapeHtml(maskApiKey(profile.apiKey)) : '未填 API Key'}${profile.isDefault ? ' · 默认' : ''}</span>`;
+      <span class="ai-profile-key">${profile.apiKey ? escapeHtml(maskApiKey(profile.apiKey)) : (profile.oauthAccountId ? '账号登录' : '未填 API Key')}${profile.isDefault ? ' · 默认' : ''}</span>`;
     btn.onclick = () => {
       state.editingAiProfileId = profile.id;
       state.activeAiProfileId = profile.id;
@@ -9446,6 +9458,10 @@ function renderAiProfileList() {
 function renderTemplateList() {
   const el = $('#ai-template-list');
   if (!el) return;
+  if (window.QMAiProviders) {
+    QMAiProviders.renderTemplates(el, { categories: AI_PROVIDER_CATEGORIES, presets: AI_PROVIDER_PRESETS, onStatus: () => QMAiProviders.loadStatus(api).then(renderTemplateList) });
+    return;
+  }
   const parts = [];
   for (const category of AI_PROVIDER_CATEGORIES) {
     const presets = AI_PROVIDER_PRESETS.filter(preset => preset.category === category);
@@ -9476,6 +9492,57 @@ function renderQuickModels(models) {
   )).join('');
 }
 
+// Bridges the form to /ai-providers.js: account sign-in panel, key detection, auto model list.
+function aiProviderHost() {
+  const rerender = () => { persistAiProfiles(); renderAiSettings(); };
+  const patchEditing = (patch) => {
+    const editing = getEditingAiProfile();
+    if (!editing) return;
+    state.aiProfiles = state.aiProfiles.map(item => (item.id === editing.id ? { ...item, ...patch, updatedAt: Date.now() } : item));
+    rerender();
+  };
+  return {
+    api,
+    profile: () => getEditingAiProfile(),
+    refreshGallery: renderTemplateList,
+    connect(accountId, label) {
+      // Persist the whole form (preset, model...) together with the account binding.
+      const editing = getEditingAiProfile();
+      if (!editing) return;
+      state.aiProfiles = state.aiProfiles.map(item => (item.id === editing.id ? { ...item, oauthAccountId: accountId } : item));
+      $('#ai-api-key').value = '';
+      if (!saveAiProfileFromForm({ silent: true })) return;
+      toast(`已登录${label ? `：${label}` : ''}`);
+      fetchAiModels({ silent: true });
+    },
+    disconnect() { patchEditing({ oauthAccountId: '' }); },
+    useKey(key, label) {
+      $('#ai-api-key').value = key;
+      $('#ai-config-note').textContent = `${label || '服务'} 授权完成，Key 已填入，点「保存」后生效。`;
+      fetchAiModels({ silent: true });
+    },
+    applyPreset(presetId, key) {
+      applyAiPreset(presetId);
+      if (key) $('#ai-api-key').value = key;
+      fetchAiModels({ silent: true });
+    },
+    autoFetchModels() {
+      const profile = readAiProfileForm();
+      const detected = window.QMAiProviders?.detect({ apiKey: profile.apiKey });
+      if (detected && detected !== profile.provider) return;
+      if (profile.apiKey && profile.baseUrl && !/[{<]/.test(profile.baseUrl) && profile.providerType !== 'azure_openai') fetchAiModels({ silent: true });
+    },
+  };
+}
+
+function mountAiProviderUi(profile) {
+  if (!window.QMAiProviders) return;
+  const host = aiProviderHost();
+  QMAiProviders.renderSignIn(profile, AI_PROVIDER_MAP[profile.provider], host);
+  QMAiProviders.bindDetection(host, AI_PROVIDER_PRESETS);
+  QMAiProviders.renderDetectHint(host, AI_PROVIDER_PRESETS);
+}
+
 function fillAiProfileForm(profile) {
   $('#ai-profile-name').value = profile.name || '';
   $('#ai-provider-id').value = profile.provider || 'custom';
@@ -9494,8 +9561,11 @@ function fillAiProfileForm(profile) {
   keyLink.classList.toggle('hidden', !profile.apiKeyUrl);
   $('#ai-config-note').textContent = profile.apiKey
     ? `当前 API Key：${maskApiKey(profile.apiKey)}`
-    : 'API Key 只保存在当前浏览器，不写入服务器数据库。';
+    : (AI_PROVIDER_MAP[profile.provider] && AI_PROVIDER_MAP[profile.provider].signIn
+      ? ''
+      : 'API Key 只保存在当前浏览器，不写入服务器数据库。');
   renderQuickModels(quickModelsForProfile(profile));
+  mountAiProviderUi(profile);
 }
 
 function renderAiSettings() {
@@ -9649,12 +9719,13 @@ function closeAiConfigModal() {
   renderAiSettings();
 }
 
-async function fetchAiModels() {
+async function fetchAiModels(options = {}) {
+  const silent = options && options.silent === true;
   if (!requireAuth('login')) return;
   const profile = readAiProfileForm();
   const config = configFromProfile(profile);
-  if (!config.apiKey || !config.baseUrl) {
-    toast('请先填写 API Key 和 Base URL');
+  if ((!config.apiKey && !config.oauthAccountId) || !config.baseUrl) {
+    if (!silent) toast('请先填写 API Key 和 Base URL');
     return;
   }
   const btn = $('#ai-fetch-models');
@@ -9678,7 +9749,7 @@ async function fetchAiModels() {
     $('#ai-config-note').textContent = `已获取 ${models.length} 个模型，点击下方模型可填入。`;
   } catch (err) {
     $('#ai-config-note').textContent = err.message;
-    toast('获取模型失败: ' + err.message, 5000);
+    if (!silent) toast('获取模型失败: ' + err.message, 5000);
   } finally {
     btn.disabled = false;
     btn.textContent = '获取模型';
@@ -9690,7 +9761,7 @@ async function testAiConnection() {
   const profile = readAiProfileForm();
   const config = configFromProfile(profile);
   if (!hasUsableAiConfig(config)) {
-    toast('请先填写 API Key、Base URL 和模型');
+    toast(config.oauthAccountId || AI_PROVIDER_MAP[profile.provider]?.signIn === 'chatgpt' || AI_PROVIDER_MAP[profile.provider]?.signIn === 'codex' ? '请先登录账号并填写模型' : '请先填写 API Key、Base URL 和模型');
     return;
   }
   const btn = $('#ai-test');
@@ -9738,7 +9809,7 @@ function setAgentCollapsed(collapsed, { persist: shouldPersist = true, auto = fa
   if (!collapsed && shouldCollapseLeftForContext()) setLeftCollapsed(true);
   state.agentCollapsed = collapsed;
   state.agentAutoCollapsed = Boolean(collapsed && auto);
-  if (shouldPersist) storage.setItem('qm_agent_collapsed', collapsed ? '1' : '0');
+  if (shouldPersist) storage.setItem('qm_agent_open', collapsed ? '0' : '1');
   $('#app').classList.toggle('agent-collapsed', collapsed);
   if (collapsed) $('#app').style.removeProperty('--agent-width');
   const rail = $('#context-open-rail');
@@ -9828,7 +9899,7 @@ function normalizeReaderWorkbenchLayout() {
     setAgentCollapsed(true, { persist: false, auto: true });
     return;
   }
-  if (state.agentAutoCollapsed && storage.getItem('qm_agent_collapsed') !== '1' && !shouldCollapseLeftForContext()) {
+  if (state.agentAutoCollapsed && storage.getItem('qm_agent_open') === '1' && !shouldCollapseLeftForContext()) {
     setAgentCollapsed(false, { persist: false });
   }
 }
@@ -10250,7 +10321,6 @@ $('#reader-copy-link').onclick = () => {
   copyReaderContent();
 };
 $('#reader-prefs-toggle').onclick = () => setReaderPrefsOpen(!state.readerPrefsOpen);
-$('#reader-prefs-close').onclick = () => setReaderPrefsOpen(false);
 const readerAssetsToggle = $('#reader-assets-toggle');
 if (readerAssetsToggle) readerAssetsToggle.onclick = () => setReaderAssetsExpanded(!state.readerAssetsExpanded);
 $('#reader-toc').onclick = (e) => {
@@ -10560,6 +10630,10 @@ $('#account-menu-dashboard').onclick = () => {
   setAccountMenuOpen(false);
   openMyCommentsModal({ tab: 'profile' });
 };
+$('#account-menu-history').onclick = () => {
+  setAccountMenuOpen(false);
+  selectView('history');
+};
 $('#account-menu-profile').onclick = () => {
   setAccountMenuOpen(false);
   if (state.me?.id) openContributor(state.me.id);
@@ -10711,7 +10785,7 @@ $('#ai-quick-models').onclick = (e) => {
   $('#ai-model').value = btn.dataset.model || btn.textContent.trim();
 };
 $('#ai-max-tokens').oninput = (e) => { e.target.value = e.target.value.replace(/[^\d]/g, ''); };
-$('#ai-fetch-models').onclick = fetchAiModels;
+$('#ai-fetch-models').onclick = () => fetchAiModels();
 $('#ai-test').onclick = testAiConnection;
 $('.agent-prompts').onclick = (e) => {
   if (e.target.closest('[data-agent-prompt-manage]')) {
@@ -10760,9 +10834,29 @@ $('#agent-prompt-list').onclick = async (e) => {
 $('#reader-immersive').onclick = () => setReaderImmersive(!state.readerImmersive);
 $('#reader-font-size-down').onclick = () => setReaderPref('fontSize', state.readerPrefs.fontSize - 1);
 $('#reader-font-size-up').onclick = () => setReaderPref('fontSize', state.readerPrefs.fontSize + 1);
-$('#reader-line-height').oninput = (e) => setReaderPref('lineHeight', e.target.value);
-$('#reader-measure').oninput = (e) => setReaderPref('measure', e.target.value);
-$('#reader-font-family').onchange = (e) => setReaderPref('font', e.target.value);
+$('#reader-preferences').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-pref]');
+  if (!btn) return;
+  if (btn.dataset.pref === 'paper') setReaderPaper(btn.dataset.value);
+  else setReaderPref(btn.dataset.pref, btn.dataset.pref === 'font' ? btn.dataset.value : Number(btn.dataset.value));
+});
+$('#reader-prefs-reset').onclick = () => {
+  state.readerPrefs = { ...READER_PREF_DEFAULTS };
+  persistReaderPrefs();
+  setReaderPaper('light');
+  applyReaderPrefs();
+};
+function setReaderMoreOpen(open) {
+  $('#reader-more-menu')?.classList.toggle('hidden', !open);
+  $('#reader-more-toggle')?.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+$('#reader-more-toggle').onclick = (e) => {
+  e.stopPropagation();
+  const open = $('#reader-more-menu').classList.contains('hidden');
+  if (open) setReaderPrefsOpen(false);
+  setReaderMoreOpen(open);
+};
+$('#reader-more-menu').addEventListener('click', () => setReaderMoreOpen(false));
 $('#manage-btn').onclick = () => { renderManage(); $('#manage-modal').classList.remove('hidden'); };
 $('#manage-close').onclick = () => $('#manage-modal').classList.add('hidden');
 $('#manage-modal').onclick = (e) => { if (e.target.id === 'manage-modal') $('#manage-modal').classList.add('hidden'); };
@@ -10829,9 +10923,7 @@ $('#search').oninput = (e) => {
 };
 
 $('#theme-toggle').onclick = () => {
-  const next = document.body.dataset.theme === 'dark' ? 'light' : 'dark';
-  document.body.dataset.theme = next;
-  storage.setItem('fr_theme', next);
+  setReaderPaper(document.body.dataset.theme === 'dark' ? 'light' : 'dark');
 };
 
 window.addEventListener('error', (e) => {
@@ -10845,6 +10937,7 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('.account-strip')) setAccountMenuOpen(false);
   if (!e.target.closest('#article-link-menu')) hideArticleLinkMenu();
   if (!e.target.closest('#reader-preferences, #reader-prefs-toggle')) setReaderPrefsOpen(false);
+  if (!e.target.closest('.reader-more')) setReaderMoreOpen(false);
 });
 
 function isShortcutEditableTarget(target) {
@@ -11122,6 +11215,7 @@ window.addEventListener('popstate', () => { mobileReaderFromList = false; });
 /* ---------- Init ---------- */
 (async function init() {
   document.body.dataset.theme = storage.getItem('fr_theme') || 'light';
+  if (document.body.dataset.theme !== 'dark' && storage.getItem('qm_paper') === 'sepia') document.body.dataset.paper = 'sepia';
   hydrateLucideIcons();
   loadAiProfilesForScope();
   renderAgentPrompts();

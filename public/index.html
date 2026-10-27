@@ -10,18 +10,18 @@
   <link rel="alternate" type="application/rss+xml" title="QMReader 公开资产 RSS" href="https://rss.qiaomu.ai/assets.xml" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="shortcut icon" href="/favicon.svg" />
-  <link rel="stylesheet" href="/styles.css?v=20261015-recovery3" />
-  <meta name="description" content="围绕 RSS 文章沉淀中文翻译、乔木风格重写、人工点评和文章对话的公开阅读站。" />
+  <link rel="stylesheet" href="/styles.css?v=20261027-release6" />
+  <meta name="description" content="精选中英文 RSS，AI 自动译成好读的中文，边读边问 AI 的阅读器。" />
   <link rel="canonical" href="https://rss.qiaomu.ai/" />
   <meta property="og:site_name" content="QMReader" />
   <meta property="og:type" content="website" />
   <meta property="og:title" content="QMReader · RSS 阅读器" />
-  <meta property="og:description" content="围绕 RSS 文章沉淀中文翻译、乔木风格重写、人工点评和文章对话的公开阅读站。" />
+  <meta property="og:description" content="精选中英文 RSS，AI 自动译成好读的中文，边读边问 AI 的阅读器。" />
   <meta property="og:url" content="https://rss.qiaomu.ai/" />
   <meta name="twitter:card" content="summary" />
   <meta name="twitter:title" content="QMReader · RSS 阅读器" />
-  <meta name="twitter:description" content="围绕 RSS 文章沉淀中文翻译、乔木风格重写、人工点评和文章对话的公开阅读站。" />
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"QMReader","url":"https://rss.qiaomu.ai/","description":"围绕 RSS 文章沉淀中文翻译、乔木风格重写、人工点评和文章对话的公开阅读站。"}</script>
+  <meta name="twitter:description" content="精选中英文 RSS，AI 自动译成好读的中文，边读边问 AI 的阅读器。" />
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"QMReader","url":"https://rss.qiaomu.ai/","description":"精选中英文 RSS，AI 自动译成好读的中文，边读边问 AI 的阅读器。"}</script>
   <script>
     window.addEventListener('load', () => {
       setTimeout(() => {
@@ -41,6 +41,7 @@
     }, { once: true });
   </script>
   <link rel="stylesheet" href="/web-collection.css?v=1.0.0">
+  <link rel="stylesheet" href="/workbench.css?v=20261027-release6">
 </head>
 <body data-theme="light">
   <div id="app">
@@ -53,6 +54,7 @@
         </button>
         <button id="sidebar-toggle" class="icon-btn" title="收起左侧栏" aria-label="收起左侧栏"><span data-qm-icon="panel-left-close"></span></button>
         <button id="theme-toggle" class="icon-btn" title="切换主题" aria-label="切换主题"><span data-qm-icon="sun-moon"></span></button>
+        <button id="submit-link-open" class="icon-btn submit-link-open brand-submit-link" type="button" title="提交链接" aria-label="提交链接"><span data-qm-icon="plus"></span></button>
       </div>
 
       <div class="views">
@@ -62,13 +64,6 @@
         <button class="view-btn" data-view="contributors"><span class="view-ico" data-qm-icon="users"></span><span class="view-label">贡献榜</span><span class="count" id="count-contributors"></span></button>
         <button class="view-btn" data-view="starred"><span class="view-ico" data-qm-icon="star"></span><span class="view-label">收藏</span><span class="count" id="count-starred"></span></button>
         <button class="view-btn" data-view="history"><span class="view-ico" data-qm-icon="history"></span><span class="view-label">历史</span><span class="count" id="count-history"></span></button>
-      </div>
-
-      <div class="sidebar-actions">
-        <button id="submit-link-open" class="submit-link-open sidebar-submit-link" type="button" title="提交链接" aria-label="提交链接">
-          <span class="submit-icon" data-qm-icon="plus"></span>
-          <span class="submit-label">提交链接</span>
-        </button>
       </div>
 
       <div id="asset-dashboard" class="asset-dashboard hidden">
@@ -120,7 +115,8 @@
         </button>
         <div id="account-menu" class="account-menu hidden" role="menu" aria-label="账户菜单">
           <button id="account-menu-dashboard" type="button" role="menuitem">我的后台</button>
-          <button id="account-menu-profile" type="button" role="menuitem">我的贡献</button>
+          <button id="account-menu-history" type="button" role="menuitem">浏览历史</button>
+          <button id="account-menu-profile" class="hidden" type="button" role="menuitem">我的贡献</button>
           <button id="account-menu-admin" class="hidden" type="button" role="menuitem">系统后台</button>
           <button id="account-menu-password" type="button" role="menuitem">修改密码</button>
           <button id="account-menu-logout" type="button" role="menuitem">退出登录</button>
@@ -213,7 +209,7 @@
         <ul class="reader-empty-keys" aria-label="键盘快捷键">
           <li><span><kbd>J</kbd><kbd>K</kbd></span>下一篇 / 上一篇</li>
           <li><span><kbd>S</kbd></span>收藏</li>
-          <li><span><kbd>A</kbd></span>问 AI 伴读</li>
+          <li><span><kbd>A</kbd></span>问 AI</li>
           <li><span><kbd>I</kbd></span>沉浸阅读</li>
           <li><span><kbd>Esc</kbd></span>退出</li>
         </ul>
@@ -261,56 +257,62 @@
           <div id="reader-asset-summary" class="reader-asset-summary hidden"></div>
           <div class="reader-toolbar">
             <div class="reader-toolbar-main">
-              <a id="reader-open-original" class="ghost-btn reader-toolbar-icon reader-open-original hidden" target="_blank" rel="noopener" title="在新标签页打开原网页" aria-label="打开原网页"><span data-qm-icon="external-link"></span><span class="button-label">原网页</span></a>
               <button id="reader-star" class="reader-action-pill" type="button" aria-label="收藏这篇文章" title="收藏（S）"></button>
-              <button id="reader-like" class="reader-action-pill" type="button" aria-label="点赞这篇文章"></button>
-              <button id="reader-copy-link" class="ghost-btn reader-toolbar-icon" type="button" title="复制文章内容（C）" aria-label="复制文章内容"><span data-qm-icon="copy"></span><span class="button-label">复制全文</span></button>
-              <button id="reader-prefs-toggle" class="ghost-btn reader-prefs-toggle reader-toolbar-icon" type="button" title="字号、行高、栏宽与字体" aria-label="字体设置" aria-expanded="false"><span data-qm-icon="sliders-horizontal"></span><span class="button-label">字体</span></button>
-              <button id="reader-immersive" class="ghost-btn reader-immersive-toggle reader-toolbar-icon" type="button" aria-pressed="false" title="沉浸阅读（I）" aria-label="沉浸阅读"><span data-qm-icon="maximize-2"></span><span class="button-label">沉浸</span></button>
+              <a id="reader-open-original" class="ghost-btn reader-toolbar-icon reader-open-original hidden" target="_blank" rel="noopener" title="在新标签页打开原网页" aria-label="打开原网页"><span data-qm-icon="external-link"></span><span class="button-label">原网页</span></a>
+              <button id="reader-prefs-toggle" class="ghost-btn reader-prefs-toggle reader-toolbar-icon" type="button" title="阅读设置：背景、字体、字号、行距、版心" aria-label="阅读设置" aria-expanded="false"><span class="reader-aa" aria-hidden="true">Aa</span><span class="button-label">阅读设置</span></button>
+              <div class="reader-more">
+                <button id="reader-more-toggle" class="ghost-btn reader-toolbar-icon" type="button" title="更多" aria-label="更多操作" aria-haspopup="menu" aria-expanded="false"><span data-qm-icon="ellipsis"></span></button>
+                <div id="reader-more-menu" class="reader-more-menu hidden" role="menu" aria-label="更多操作">
+                  <button id="reader-copy-link" type="button" role="menuitem" title="复制文章内容（C）"><span data-qm-icon="copy"></span><span class="button-label">复制全文</span><kbd>C</kbd></button>
+                  <button id="reader-immersive" class="reader-immersive-toggle" type="button" role="menuitem" aria-pressed="false" title="沉浸阅读（I）"><span data-qm-icon="maximize-2"></span><span class="button-label">沉浸阅读</span><kbd>I</kbd></button>
+                  <button id="reader-like" class="reader-action-pill" type="button" role="menuitem" aria-label="点赞这篇文章"></button>
+                </div>
+              </div>
             </div>
             <div class="reader-toolbar-admin">
               <button id="reader-delete" class="ghost-btn danger reader-delete reader-toolbar-icon hidden" type="button" title="删除页面" aria-label="删除页面"><span data-qm-icon="trash-2"></span><span class="button-label">删除页面</span></button>
             </div>
           </div>
-          <div id="reader-preferences" class="reader-preferences hidden" aria-label="字体设置">
+          <div id="reader-preferences" class="reader-preferences hidden" role="dialog" aria-label="阅读设置">
             <div class="reader-pref-head">
-              <strong>字体设置</strong>
-              <button id="reader-prefs-close" class="icon-btn" type="button" title="关闭字体设置" aria-label="关闭字体设置"><span data-qm-icon="x"></span></button>
+              <strong>阅读设置</strong>
+              <button id="reader-prefs-reset" class="reader-pref-reset" type="button">恢复默认</button>
             </div>
-            <div class="reader-pref-grid">
-              <div class="reader-pref-group" role="group" aria-label="字号">
-                <button id="reader-font-size-down" class="reader-pref-icon" type="button" title="减小字号" aria-label="减小字号"><span data-qm-icon="a-arrow-down"></span></button>
-                <output id="reader-font-size-value" class="reader-pref-value">16.5</output>
-                <button id="reader-font-size-up" class="reader-pref-icon" type="button" title="增大字号" aria-label="增大字号"><span data-qm-icon="a-arrow-up"></span></button>
+            <div class="pref-seg pref-seg-paper" role="group" aria-label="背景">
+              <button type="button" data-pref="paper" data-value="light">浅色</button>
+              <button type="button" data-pref="paper" data-value="sepia">护眼</button>
+              <button type="button" data-pref="paper" data-value="dark">深色</button>
+            </div>
+            <div class="pref-seg pref-seg-font" role="group" aria-label="字体">
+              <button type="button" data-pref="font" data-value="default" class="pref-font-default">系统默认</button>
+              <button type="button" data-pref="font" data-value="sans" class="pref-font-sans">思源黑体</button>
+              <button type="button" data-pref="font" data-value="serif" class="pref-font-serif">思源宋体</button>
+              <button type="button" data-pref="font" data-value="kai" class="pref-font-kai">霞鹜文楷</button>
+            </div>
+            <div class="pref-row">
+              <div class="pref-seg pref-seg-size" role="group" aria-label="字号">
+                <button id="reader-font-size-down" type="button" title="缩小字号" aria-label="缩小字号">A−</button>
+                <output id="reader-font-size-value" class="reader-pref-value">17</output>
+                <button id="reader-font-size-up" type="button" title="放大字号" aria-label="放大字号">A+</button>
               </div>
-              <label class="reader-pref-label">
-                <span>行高</span>
-                <input id="reader-line-height" type="range" min="1.65" max="2.05" step="0.05" />
-              </label>
-              <label class="reader-pref-label reader-pref-width">
-                <span>栏宽</span>
-                <input id="reader-measure" type="range" min="56" max="84" step="2" />
-              </label>
-              <label class="reader-pref-select-label">
-                <span>字体</span>
-                <select id="reader-font-family" aria-label="阅读字体">
-                  <option value="default">默认混排</option>
-                  <option value="pingfang">苹方黑体</option>
-                  <option value="song">宋体</option>
-                  <option value="kai">楷体</option>
-                  <option value="serif">衬线</option>
-                  <option value="mono">等宽</option>
-                  <option value="hei">系统黑体</option>
-                </select>
-              </label>
+              <div class="pref-seg pref-seg-lh" role="group" aria-label="行距">
+                <button type="button" data-pref="lineHeight" data-value="1.7" title="行距：紧凑" aria-label="行距紧凑"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14M5 12h14M5 16h14"/></svg></button>
+                <button type="button" data-pref="lineHeight" data-value="1.9" title="行距：适中" aria-label="行距适中"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6.5h14M5 12h14M5 17.5h14"/></svg></button>
+                <button type="button" data-pref="lineHeight" data-value="2.1" title="行距：宽松" aria-label="行距宽松"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14M5 12h14M5 19h14"/></svg></button>
+              </div>
+            </div>
+            <div class="pref-seg pref-seg-measure" role="group" aria-label="版心宽度">
+              <button type="button" data-pref="measure" data-value="60">窄栏</button>
+              <button type="button" data-pref="measure" data-value="70">标准栏</button>
+              <button type="button" data-pref="measure" data-value="80">宽栏</button>
             </div>
           </div>
         </header>
         <div id="reader-audio"></div>
         <a id="reader-podcast-notes" class="icon-btn reader-section-icon hidden" href="#" target="_blank" rel="noopener noreferrer" title="阅读私人播客摘要与逐字稿（仅管理员）" aria-label="阅读私人播客摘要与逐字稿（仅管理员）"><span data-qm-icon="file-text"></span></a>
         <div class="reader-tabs" role="tablist" aria-label="文章阅读模式">
+          <button class="reader-tab" type="button" data-tab="rewrite">中文</button>
           <button class="reader-tab active" type="button" data-tab="original">原文</button>
-          <button class="reader-tab" type="button" data-tab="rewrite">中文改写</button>
         </div>
         <details id="reader-toc" class="reader-toc hidden">
           <summary>目录</summary>
@@ -400,11 +402,11 @@
         </section>
         <div id="annotation-popover" class="annotation-popover hidden" role="dialog" aria-label="划线点评">
           <div class="annotation-popover-quote" id="annotation-popover-quote"></div>
-          <textarea id="annotation-popover-input" rows="3" placeholder="补充点评，可留空只划线…"></textarea>
+          <textarea id="annotation-popover-input" class="hidden" rows="3" aria-hidden="true" tabindex="-1"></textarea>
           <div class="annotation-popover-actions">
-            <button id="annotation-popover-copy" class="ghost-btn annotation-popover-copy" type="button">复制</button>
-            <button id="annotation-popover-send-ai" class="ghost-btn" type="button">发给AI</button>
-            <button id="annotation-popover-submit" class="ghost-btn primary" type="button">划线/点评</button>
+            <button id="annotation-popover-submit" class="annotation-pill-btn" type="button"><span data-qm-icon="highlighter"></span>划线</button>
+            <button id="annotation-popover-send-ai" class="annotation-pill-btn" type="button"><span data-qm-icon="sparkles"></span>问 AI</button>
+            <button id="annotation-popover-copy" class="annotation-pill-btn annotation-popover-copy" type="button"><span data-qm-icon="copy"></span>复制</button>
           </div>
         </div>
       </article>
@@ -568,10 +570,12 @@
 
     <!-- ===== Article context ===== -->
     <aside id="agent-pane" class="context-pane">
-      <div class="context-tabs" aria-label="文章侧栏">
-        <button id="context-tab-agent" class="context-tab active" type="button" data-context-panel="agent" aria-pressed="true">
-          <span>AI 伴读</span>
+      <div class="context-tabs" aria-label="AI 对话">
+        <button id="context-tab-agent" class="context-tab active" type="button" data-context-panel="agent" aria-pressed="true" tabindex="-1">
+          <span data-qm-icon="sparkles" aria-hidden="true"></span><span>AI 对话</span>
         </button>
+        <select id="agent-profile-select" class="ai-profile-select agent-profile-select" title="选择用于文章对话的模型" aria-label="选择用于文章对话的模型"></select>
+        <button id="agent-settings" class="icon-btn" title="AI 设置：模型与常用提示词" aria-label="AI 设置"><span data-qm-icon="settings"></span></button>
         <button id="context-tab-annotations" class="context-tab" type="button" data-context-panel="annotations" aria-pressed="false">
           <span>划线评论</span>
           <strong id="context-annotation-count">0</strong>
@@ -579,14 +583,6 @@
         <button id="context-close" class="icon-btn context-close" title="收起右侧栏" aria-label="收起右侧栏"><span data-qm-icon="panel-right-close"></span></button>
       </div>
       <section id="agent-side-panel" class="context-panel agent-side-panel">
-        <header class="agent-head">
-          <div class="agent-head-main">
-            <select id="agent-profile-select" class="ai-profile-select agent-profile-select" title="选择用于文章对话的模型" aria-label="选择用于文章对话的模型"></select>
-          </div>
-          <div class="agent-head-actions">
-            <button id="agent-settings" class="icon-btn" title="AI 模型配置" aria-label="AI 模型配置"><span data-qm-icon="settings"></span></button>
-          </div>
-        </header>
         <div id="agent-context-strip" class="agent-context-strip"></div>
         <div id="persona-agent-host" class="persona-agent-host" aria-label="AI 伴读对话"></div>
         <div id="agent-messages" class="agent-messages"></div>
@@ -594,9 +590,8 @@
         <form id="agent-form" class="agent-form">
           <div id="agent-inline-context" class="agent-inline-context hidden"></div>
           <div class="agent-composer">
-            <textarea id="agent-input" rows="2" placeholder="问当前文章…" disabled></textarea>
+            <textarea id="agent-input" rows="2" placeholder="就这篇文章提问…（回车发送，Shift+回车换行）" disabled></textarea>
             <div class="agent-composer-actions">
-              <span class="agent-composer-hint">基于当前文章</span>
               <button id="agent-send" class="ghost-btn" type="submit" title="发送" aria-label="发送" disabled><span data-qm-icon="send"></span></button>
             </div>
           </div>
@@ -625,7 +620,7 @@
   <div id="mobile-reader-bar" class="mobile-reader-bar" role="toolbar" aria-label="阅读导航">
     <button id="mobile-back" class="mobile-back" type="button" aria-label="返回文章列表"><span data-qm-icon="arrow-left" aria-hidden="true"></span><span>返回</span></button>
     <span id="mobile-reader-title" class="mobile-reader-title" aria-hidden="true"></span>
-    <button id="mobile-ai-open" class="mobile-ai-open" type="button" aria-label="打开 AI 伴读"><span data-qm-icon="sparkles" aria-hidden="true"></span><span>AI 伴读</span></button>
+    <button id="mobile-ai-open" class="mobile-ai-open" type="button" aria-label="打开 AI 伴读"><span data-qm-icon="sparkles" aria-hidden="true"></span><span>问 AI</span></button>
   </div>
   <nav id="mobile-tabbar" class="mobile-tabbar" aria-label="主导航">
     <button type="button" data-mobile-tab="home"><span data-qm-icon="newspaper" aria-hidden="true"></span><span>文章</span></button>
@@ -887,10 +882,12 @@
   <div id="toast" class="toast hidden"></div>
 
   <script defer src="/purify.min.js?v=3.4.17"></script>
-  <script defer src="/lucide-icons.js?v=3"></script>
+  <script defer src="/lucide-icons.js?v=4"></script>
   <script defer src="/request-json.js?v=recovery-20261015"></script>
-  <script defer src="/app.js?v=20261017-flash1017"></script>
+  <script defer src="/ai-providers.js?v=20261027-release6"></script>
+  <script defer src="/app.js?v=20261027-release6"></script>
   <script defer src="/podscribe.js?v=6"></script>
   <script defer src="/web-collection.js?v=1.0.0"></script>
+  <script defer src="/workbench.js?v=20261027-release6"></script>
 </body>
 </html>

@@ -1,0 +1,652 @@
+/* Workbench layer. Loaded after styles.css; only restyles and re-arranges.
+ * Selectors keep the #app prefix so they win over the older override blocks
+ * without !important. Dark theme keeps its own palette from styles.css. */
+
+[data-theme="light"] {
+  --bg-0: #f6f6f5;
+  --bg-1: #fbfbfa;
+  --bg-2: #efefed;
+  --bg-3: #e6e6e3;
+  --surface: #ffffff;
+  --border: #e4e4e0;
+  --border-subtle: #ececE9;
+  --text-0: #171717;
+  --text-1: #4c4c48;
+  --text-2: #85857f;
+  --signal: #2563c9;
+  --focus-ring: #2563c9;
+}
+[data-theme="dark"] {
+  --signal: #6b9bff;
+  --focus-ring: #6b9bff;
+}
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+/* ---------- layout ---------- */
+#app {
+  --sidebar-width: 208px;
+  --entry-width: minmax(296px, 320px);
+  --agent-width: 340px;
+}
+#app.sidebar-collapsed { --sidebar-width: 64px; }
+
+/* ---------- sidebar: fewer rows, quieter ---------- */
+#app #sidebar { background: var(--bg-0); }
+/* 未读 / 热门 are the same filters as the list tabs; the list owns them now. */
+#app .view-btn[data-view="unread"],
+#app .view-btn[data-view="hot"] { display: none; }
+#app .view-btn { height: 32px; border-radius: 7px; }
+#app .view-btn.active { background: rgba(17, 17, 17, 0.07); font-weight: 600; }
+[data-theme="dark"] #app .view-btn.active { background: rgba(255, 255, 255, 0.1); }
+#app .sidebar-submit-link {
+  background: transparent;
+  color: var(--text-1);
+  border: 1px dashed var(--border);
+  box-shadow: none;
+  height: 32px;
+  font-weight: 500;
+}
+#app .sidebar-submit-link:hover { background: rgba(17, 17, 17, 0.045); color: var(--text-0); }
+/* Asset stats are secondary: keep one quiet row, drop the filter grid. */
+#app .asset-dashboard { padding: 0 8px; }
+#app .asset-dashboard .asset-dashboard-grid,
+#app .asset-dashboard .asset-dashboard-action { display: none; }
+#app .asset-dashboard-open {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  text-align: left;
+}
+#app .asset-dashboard-open:hover { background: rgba(17, 17, 17, 0.045); }
+#app .asset-dashboard-open strong { color: var(--text-1); font-weight: 600; }
+
+/* ---------- list ---------- */
+#app #entry-pane { background: var(--bg-1); }
+#app .list-scope-bar {
+  display: flex;
+  gap: 2px;
+  margin: 8px 12px 0;
+  padding: 3px;
+  background: var(--bg-2);
+  border-radius: 8px;
+}
+#app .list-scope-btn {
+  flex: 1;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-1);
+  font-size: 13px;
+}
+#app .list-scope-btn.active {
+  background: var(--surface);
+  color: var(--text-0);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+#app .entry-card { border-radius: 8px; }
+#app .entry-card.active { background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
+#app .entry-card.read .entry-title { color: var(--text-1); font-weight: 500; }
+#app .entry-card:not(.read) .entry-title { color: var(--text-0); font-weight: 650; }
+#app .unread-dot { background: var(--signal); }
+
+/* ---------- reader ---------- */
+#app #reader-pane > #reader { padding: 0 var(--wb-pad, 56px) 120px; }
+#app #reader > .reader-tabs,
+#app #reader .reader-signal-rail,
+#app #reader .reader-head .reader-toolbar { display: none; }
+
+#app .wb-bar {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  margin: 0 calc(var(--wb-pad, 56px) * -1) 8px;
+  padding: 0 var(--wb-pad, 56px);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-subtle);
+}
+#app .wb-modes {
+  display: flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+#app .wb-modes button {
+  height: 26px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-1);
+  font-size: 12.5px;
+}
+#app .wb-modes button[aria-pressed="true"] { background: var(--text-0); color: var(--surface); }
+#app .wb-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+#app .wb-actions > .ghost-btn,
+#app .wb-actions > .reader-action-pill,
+#app .wb-more-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-1);
+  font-size: 12.5px;
+}
+#app .wb-actions .button-label,
+#app .wb-actions .reader-action-label { display: none; }
+#app .wb-actions > .ghost-btn:hover,
+#app .wb-actions > .reader-action-pill:hover,
+#app .wb-more-btn:hover { background: rgba(17, 17, 17, 0.05); color: var(--text-0); }
+#app .wb-actions > [aria-pressed="true"],
+#app .wb-actions > .active { background: rgba(17, 17, 17, 0.07); color: var(--text-0); }
+#app .wb-actions > #reader-star.active,
+#app .wb-actions > #reader-star[aria-pressed="true"] { color: #c98a12; }
+#app .wb-actions > #reader-star.active svg,
+#app .wb-actions > #reader-star[aria-pressed="true"] svg { fill: currentColor; }
+#app .wb-actions .reader-action-count { font-variant-numeric: tabular-nums; color: inherit; }
+#app .wb-actions .reader-action-count:empty { display: none; }
+
+#app .wb-more { position: relative; }
+#app .wb-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 188px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+}
+#app .wb-menu.hidden { display: none; }
+#app .wb-menu > * {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-1);
+  font-size: 13px;
+  text-align: left;
+  text-decoration: none;
+}
+#app .wb-menu > .hidden { display: none; }
+#app .wb-menu > *:hover { background: rgba(17, 17, 17, 0.05); color: var(--text-0); }
+#app .wb-actions .wb-menu .button-label,
+#app .wb-actions .wb-menu .reader-action-label { display: inline; }
+#app .wb-menu .reader-action-count { margin-left: auto; color: var(--text-2); }
+#app .wb-menu #reader-delete { color: var(--semantic-red); }
+#app .wb-more #reader-preferences {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 21;
+  width: min(360px, 90vw);
+}
+
+/* header: let the title lead */
+#app .reader-head { padding-top: 28px; }
+#app .reader-source { color: var(--text-1); }
+
+/* ---------- next-article card ---------- */
+#app .wb-next {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: var(--reader-column, 640px);
+  margin: 40px auto 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-0);
+  text-align: left;
+}
+#app .wb-next.hidden { display: none; }
+#app .wb-next:hover { background: rgba(17, 17, 17, 0.04); }
+#app .wb-next-text { min-width: 0; flex: 1; }
+#app .wb-next small { display: block; font-size: 12px; color: var(--text-2); }
+#app .wb-next b {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 14.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#app .wb-next kbd {
+  font: 11px var(--font-ui);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+/* ---------- immersive keeps the bar, drops the chrome ---------- */
+#app.reader-immersive .wb-bar { background: var(--surface); }
+
+/* ---------- narrow screens ---------- */
+@media (max-width: 760px) {
+  #app #reader-pane > #reader { --wb-pad: 20px; }
+  #app .wb-bar { height: 48px; gap: 4px; }
+  #app .wb-ai { display: none; } /* the mobile top bar already carries AI */
+  #app .wb-modes button { padding: 0 9px; }
+  #app .wb-next { margin-top: 28px; }
+  #app .wb-menu { right: -4px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #app * { transition: none !important; }
+}
+
+/* brand row fits the narrower sidebar */
+#app .brand { gap: 4px; padding-inline: 12px 8px; }
+#app .brand .icon-btn { width: 28px; height: 28px; }
+#app .brand-name { white-space: nowrap; }
+
+/* reading surface is paper-white in the light theme */
+body[data-theme="light"] #app > #reader-pane { background: var(--surface); }
+
+/* the pill label is visually hidden by default; show it inside the menu */
+#app .wb-actions .wb-menu .reader-action-label {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  white-space: nowrap;
+}
+
+/* dark theme: hover and pressed tints must lighten, not darken */
+[data-theme="dark"] #app .wb-actions > .ghost-btn:hover,
+[data-theme="dark"] #app .wb-actions > .reader-action-pill:hover,
+[data-theme="dark"] #app .wb-more-btn:hover,
+[data-theme="dark"] #app .wb-menu > *:hover,
+[data-theme="dark"] #app .wb-next:hover,
+[data-theme="dark"] #app .sidebar-submit-link:hover,
+[data-theme="dark"] #app .asset-dashboard-open:hover { background: rgba(255, 255, 255, 0.07); }
+[data-theme="dark"] #app .wb-actions > [aria-pressed="true"],
+[data-theme="dark"] #app .wb-actions > .active { background: rgba(255, 255, 255, 0.11); }
+[data-theme="dark"] #app .wb-menu { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
+
+/* ================= polish pass ================= */
+/* sidebar: wider so the brand never truncates; quiet submit row */
+#app { --sidebar-width: 220px; }
+#app.sidebar-collapsed { --sidebar-width: 64px; }
+#app .brand-name { font-size: 14px; letter-spacing: -0.01em; }
+#app #sidebar #submit-link-open {
+  background: transparent;
+  color: var(--text-1);
+  border: 1px dashed var(--border);
+  box-shadow: none;
+  height: 32px;
+  font-weight: 500;
+}
+#app #sidebar #submit-link-open:hover { background: rgba(17, 17, 17, 0.045); color: var(--text-0); }
+[data-theme="dark"] #app #sidebar #submit-link-open:hover { background: rgba(255, 255, 255, 0.07); }
+#app .view-btn { height: 32px; font-size: 13.5px; }
+#app .feed-item { height: 30px; border-radius: 7px; }
+#app .feed-item .err-dot { opacity: 0.6; }
+
+/* list: calmer header, A-style rows */
+#app .pane-header { padding-top: 12px; }
+#app .entry-pane-tabs { margin: 6px 12px 0; padding: 0; border: 0; gap: 14px; }
+#app .entry-pane-tab { font-size: 12.5px; color: var(--text-2); padding: 8px 0; }
+#app .entry-pane-tab.active { color: var(--text-0); font-weight: 600; }
+#app .entry-list { padding: 4px 6px 16px; }
+#app .entry-card { padding: 11px 12px 12px 22px; margin: 0 0 2px; }
+#app .entry-card:hover { background: rgba(17, 17, 17, 0.04); }
+#app .entry-card.active:hover { background: var(--surface); }
+[data-theme="dark"] #app .entry-card:hover { background: rgba(255, 255, 255, 0.05); }
+#app .entry-card .unread-dot { left: 9px; }
+#app .entry-source-line .src { font-size: 12px; color: var(--text-2); }
+#app .entry-time { font-size: 12px; color: var(--text-2); }
+#app .entry-card .entry-title { margin-top: 5px; font-size: 14.5px; line-height: 1.45; }
+#app .entry-card .entry-summary { margin-top: 4px; font-size: 12.5px; line-height: 1.55; color: var(--text-2); }
+
+/* reader bar: source crumb on the left, controls on the right */
+#app .wb-crumb {
+  min-width: 0;
+  max-width: 28%;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#app .wb-modes { margin-left: auto; }
+#app .wb-actions { margin-left: 4px; }
+
+/* reader header: title leads, meta whispers */
+#app #reader .reader-head { padding-top: 30px; padding-bottom: 20px; margin-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }
+#app #reader .reader-kicker-row { margin-bottom: 14px; }
+#app #reader .reader-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+#app #reader .reader-meta-row,
+#app #reader .reader-meta,
+#app #reader .reader-view-count { font-size: 12.5px; color: var(--text-2); }
+#app #reader #reader-title { font-size: clamp(24px, 2vw, 28px); font-weight: 650; line-height: 1.38; }
+#app #reader .reader-title-zh { margin-top: 6px; font-size: 14.5px; }
+#app #reader .reader-content { margin-top: 6px; }
+@media (max-width: 760px) { #app .wb-crumb { display: none; } #app .wb-modes { margin-left: 0; } }
+
+/* ================= reading experience ================= */
+/* the active list row is a paper card; no side stripe */
+#app #entry-pane .entry-card.active::before { display: none; }
+
+/* progress hairline under the bar */
+#app .wb-bar { border-bottom-color: transparent; }
+#app .wb-bar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--border-subtle);
+}
+#app .wb-bar::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: 1;
+  width: calc(var(--wb-progress, 0) * 100%);
+  height: 2px;
+  background: var(--text-0);
+  opacity: 0.55;
+}
+
+/* header: compact, the title is the first thing you read */
+#app #reader .reader-head { padding: 26px 0 18px; margin: 0 0 6px; border-bottom: 0; }
+#app #reader .reader-kicker-row { margin-bottom: 12px; }
+#app #reader #reader-title { font-size: clamp(25px, 2.1vw, 30px); font-weight: 650; line-height: 1.34; text-wrap: balance; }
+#app #reader .reader-title-zh { margin-top: 8px; font-size: 15px; line-height: 1.5; }
+#app #reader .reader-asset-badges:not(.hidden),
+#app #reader .reader-asset-summary:not(.hidden) { margin-top: 12px; }
+
+/* version header (翻译 / 改写): one slim line instead of a block */
+#app #reader .annotation-surface-panel > .reader-section-head {
+  min-height: 32px;
+  margin: 0 0 12px;
+  padding: 0;
+  border: 0;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+#app #reader .reader-section-actions { gap: 6px; }
+#app #reader .reader-section-actions .ghost-btn,
+#app #reader .reader-section-actions .asset-helpful-btn,
+#app #reader .reader-section-actions .icon-btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+#app #reader .reader-section-actions .ghost-btn.primary { background: var(--text-0); color: var(--surface); border-color: transparent; }
+#app #reader .asset-meta-line { margin: -4px 0 12px; font-size: 12px; color: var(--text-2); }
+
+/* body typography */
+#app #reader .reader-content,
+#app #reader .rewrite-content {
+  max-width: none;
+  margin-top: 4px;
+  color: var(--text-0);
+  line-height: var(--reader-line-height-effective, 1.86);
+  text-wrap: pretty;
+  overflow-wrap: break-word;
+}
+#app #reader .reader-content p,
+#app #reader .rewrite-content p { margin: 0 0 var(--reader-paragraph-gap, 1.15em); }
+#app #reader .reader-content h1, #app #reader .reader-content h2, #app #reader .reader-content h3, #app #reader .reader-content h4,
+#app #reader .rewrite-content h1, #app #reader .rewrite-content h2, #app #reader .rewrite-content h3, #app #reader .rewrite-content h4 {
+  margin: 2em 0 0.6em;
+  font-weight: 650;
+  line-height: 1.38;
+  text-wrap: balance;
+}
+#app #reader .reader-content h2, #app #reader .rewrite-content h2 { font-size: 1.28em; }
+#app #reader .reader-content h3, #app #reader .rewrite-content h3 { font-size: 1.1em; }
+#app #reader .reader-content > :first-child,
+#app #reader .rewrite-content > :first-child { margin-top: 0; }
+#app #reader .reader-content img,
+#app #reader .rewrite-content img { display: block; max-width: 100%; height: auto; margin: 1.5em 0; border-radius: 10px; }
+#app #reader .reader-content figure,
+#app #reader .rewrite-content figure { margin: 1.6em 0; }
+#app #reader .reader-content figure img,
+#app #reader .rewrite-content figure img { margin: 0 0 0.6em; }
+#app #reader .reader-content figcaption,
+#app #reader .rewrite-content figcaption { color: var(--text-2); font-size: 0.82em; line-height: 1.55; text-align: center; }
+#app #reader .reader-content blockquote,
+#app #reader .rewrite-content blockquote {
+  margin: 1.5em 0;
+  padding: 0.9em 1.15em;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bg-2);
+  color: var(--text-1);
+}
+#app #reader .reader-content blockquote p:last-child,
+#app #reader .rewrite-content blockquote p:last-child { margin-bottom: 0; }
+#app #reader .reader-content ul, #app #reader .reader-content ol,
+#app #reader .rewrite-content ul, #app #reader .rewrite-content ol { margin: 0 0 var(--reader-paragraph-gap, 1.15em); padding-left: 1.4em; }
+#app #reader .reader-content li + li,
+#app #reader .rewrite-content li + li { margin-top: 0.35em; }
+#app #reader .reader-content pre,
+#app #reader .rewrite-content pre { margin: 1.5em 0; border-radius: 10px; font-size: 0.8em; line-height: 1.65; }
+#app #reader .reader-content a,
+#app #reader .rewrite-content a { text-underline-offset: 0.2em; }
+
+/* what lives below the article is secondary */
+#app #reader .reader-annotations,
+#app #reader .reader-comments { margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--border-subtle); }
+#app #reader .reader-annotations > .reader-section-head,
+#app #reader .reader-comments > .reader-section-head { color: var(--text-1); font-size: 13px; font-weight: 600; }
+#app .wb-next { margin-top: 36px; }
+#app #reader { padding-bottom: 96px; }
+
+/* table of contents: a quiet disclosure, not a box */
+#app #reader .reader-toc:not(.hidden) { margin: 0 0 14px; padding: 0; border: 0; background: transparent; }
+#app #reader .reader-toc > summary { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 0; color: var(--text-2); font-size: 12.5px; cursor: pointer; }
+#app #reader .reader-toc > summary:hover { color: var(--text-0); }
+
+/* ================= round 3: calmer list header, TOC popover, crumb on scroll ================= */
+/* the home sub-tabs duplicate what the sidebar and the list header already say */
+#app #entry-pane-tabs,
+#app #asset-activity-strip { display: none; }
+#app .wb-list-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px 14px 2px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+  color: var(--text-2);
+}
+#app .wb-list-meta b { color: var(--text-0); font-size: 13px; font-weight: 600; }
+#app .wb-list-meta.hidden { display: none; }
+
+/* the bar's source crumb only appears once the header has scrolled away */
+#app .wb-crumb { opacity: 0; transition: opacity 0.15s ease; }
+#app .wb-bar.wb-scrolled .wb-crumb { opacity: 1; }
+
+/* table of contents */
+#app .wb-toc-btn.hidden { display: none; }
+#app .wb-bar > #reader-toc { position: absolute; top: calc(100% + 6px); right: var(--wb-pad, 56px); z-index: 12; margin: 0; }
+#app .wb-bar > #reader-toc:not([open]) > nav { display: none; }
+#app .wb-bar > #reader-toc > nav {
+  display: flex;
+  flex-direction: column;
+  width: min(280px, 86vw);
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+}
+#app .wb-bar > #reader-toc.hidden { display: none; }
+#app .wb-bar > #reader-toc .reader-toc-link {
+  display: block;
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: var(--text-1);
+  font-size: 13px;
+  line-height: 1.4;
+  text-decoration: none;
+}
+#app .wb-bar > #reader-toc .reader-toc-link:hover { background: rgba(17, 17, 17, 0.05); color: var(--text-0); }
+[data-theme="dark"] #app .wb-bar > #reader-toc .reader-toc-link:hover { background: rgba(255, 255, 255, 0.07); }
+#app .wb-bar > #reader-toc .reader-toc-h3 { padding-left: 22px; color: var(--text-2); }
+#app .wb-bar > #reader-toc .reader-toc-h4 { padding-left: 34px; color: var(--text-2); }
+#app .wb-actions > .wb-toc-btn[aria-pressed="true"] { background: rgba(17, 17, 17, 0.07); }
+@media (max-width: 760px) { #app .wb-bar > #reader-toc { right: 8px; } }
+#app .wb-bar > #reader-toc > summary { display: none; }
+
+/* ---------- round 4 ---------- */
+/* the article page leads with the title: source/author/date/visits are redundant */
+#app #reader .reader-kicker-row { display: none; }
+#app #reader .reader-head { padding: 22px 0 6px; margin: 0; }
+#app #reader .reader-title-row { margin: 0; }
+#app #reader .reader-content > :first-child,
+#app #reader .rewrite-content > :first-child { margin-top: 14px; }
+
+/* the reading surface stays paper-white even when the list is collapsed */
+#app #reader-pane { background: var(--surface); }
+
+/* mode switch aligns with the title; crumb follows it, actions go right */
+#app .wb-modes { order: 1; margin-left: 0; }
+#app .wb-crumb { order: 2; flex: 1; max-width: none; margin-left: 4px; }
+#app .wb-actions { order: 3; margin-left: auto; }
+
+/* copy / font settings live on the bar as icon buttons */
+#app .wb-actions .wb-icon-only .button-label { display: none; }
+#app .wb-actions .wb-icon-only {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  justify-content: center;
+}
+#app .wb-aa { font-size: 14px; font-weight: 650; letter-spacing: -0.02em; line-height: 1; }
+#app .wb-prefs-wrap { position: relative; display: flex; }
+#app .wb-prefs-wrap #reader-preferences {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: -40px;
+  z-index: 22;
+  width: min(332px, 92vw);
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.14);
+}
+#app .wb-prefs-wrap #reader-preferences.hidden { display: none; }
+#app .reader-pref-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; font-size: 12px; color: var(--text-2); }
+#app .reader-pref-head strong { font-weight: 500; }
+#app .wb-pref-reset { border: 0; background: transparent; color: var(--text-2); font-size: 12px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+#app .wb-pref-reset:hover { color: var(--text-0); }
+#app .wb-prefs-ui { display: flex; flex-direction: column; gap: 8px; }
+#app .wb-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+#app .wb-chips button,
+#app .wb-seg button {
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+#app .wb-chips button[aria-pressed="true"] { background: var(--surface); border-color: var(--text-0); color: var(--text-0); font-weight: 600; }
+#app .wb-pref-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: center; }
+#app .wb-seg { display: flex; gap: 2px; padding: 2px; background: var(--bg-2); border-radius: 9px; }
+#app .wb-seg button { flex: 1; height: 28px; padding: 0 4px; background: transparent; border-radius: 7px; font-size: 12px; }
+#app .wb-seg button[aria-pressed="true"] { background: var(--surface); color: var(--text-0); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+#app .wb-size-slot .reader-pref-group { display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 2px; background: var(--bg-2); border-radius: 9px; }
+#app .wb-size-slot .reader-pref-icon { width: 30px; height: 28px; border: 0; border-radius: 7px; background: transparent; color: var(--text-1); }
+#app .wb-size-slot .reader-pref-icon:hover { background: var(--surface); }
+#app .wb-size-slot .reader-pref-value { font-size: 13px; font-weight: 600; color: var(--text-0); }
+
+/* thin scrollbar that only shows while scrolling */
+#app #reader-pane { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+#app #reader-pane.wb-scrolling { scrollbar-color: rgba(120, 120, 120, 0.45) transparent; }
+#app #reader-pane::-webkit-scrollbar { width: 8px; }
+#app #reader-pane::-webkit-scrollbar-thumb { background: transparent; border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+#app #reader-pane.wb-scrolling::-webkit-scrollbar-thumb { background-color: rgba(120, 120, 120, 0.45); }
+@media (max-width: 760px) { #app .wb-prefs-wrap #reader-preferences { right: -90px; } }
+#app .reader-pref-grid { display: block; }
+#app .wb-prefs-ui { width: 100%; }
+#app .wb-chips button, #app .wb-seg button { min-width: 0; white-space: nowrap; padding: 0 4px; }
+#app .wb-prefs-ui .reader-pref-group { width: 100%; }
+/* the collapsed / immersive vignette made the page edges grey: keep it plain paper */
+#app.reading.left-collapsed #reader-pane,
+#app.reading.agent-collapsed #reader-pane,
+#app.reader-immersive #reader-pane { background: var(--surface); }
+
+/* Buttons moved from the former menu retain the same compact toolbar geometry. */
+#app .wb-actions kbd { display: none; }
+#app .wb-actions .ghost-btn { box-shadow: none; }
+#app .wb-prefs-wrap > #reader-prefs-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; min-width: 32px; height: 32px; padding: 0;
+  border: 0; border-radius: 7px; background: transparent; color: var(--text-1);
+}
+#app .wb-prefs-wrap > #reader-prefs-toggle:hover { background: var(--bg-2); }
+
+@media (max-width: 760px) {
+  #app .wb-bar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 48px;
+    padding: 6px 12px;
+    gap: 4px;
+  }
+  #app .wb-bar .wb-ai { display: none; }
+  #app .wb-modes { flex: 0 0 auto; }
+  #app .wb-modes button { padding: 0 7px; white-space: nowrap; }
+  #app .wb-actions { flex: 0 0 auto; margin-left: auto; }
+}
+
+#app .entry-card.read .entry-summary { opacity: 1; }
+
+#app #sidebar .brand .brand-home { gap: 4px; }

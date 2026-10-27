@@ -104,9 +104,13 @@ test('short headings remain part of translation coverage', () => {
   assert.deepEqual(blocks.map(block => block.source), ['Results', 'A normal paragraph with enough text.']);
 });
 
-test('a single oversized structure block fails before calling the model', () => {
-  const blocks = deepseek.__test.htmlToTranslationBlocks(`<p>${'Long sentence. '.repeat(1200)}</p>`, '');
-  assert.throws(() => deepseek.__test.chunkTranslationBlocks(blocks), /过长的单个结构块/);
+test('oversized paragraphs split without dropping text or exceeding the chunk budget', () => {
+  const text = 'Long sentence. '.repeat(1200);
+  const blocks = deepseek.__test.htmlToTranslationBlocks(`<p>${text}</p>`, '');
+  assert.ok(blocks.length > 1);
+  assert.equal(blocks.map(block => block.source).join('').replace(/\s/g, ''), text.replace(/\s/g, ''));
+  const chunks = deepseek.__test.chunkTranslationBlocks(blocks);
+  assert.equal(chunks.flat().length, blocks.length);
 });
 
 test('preformatted blocks keep newlines and closing tags intact', () => {
