@@ -50,6 +50,8 @@ const ICONS = [
   ['quote', 'Quote'],
   ['radio-tower', 'RadioTower'],
   ['refresh-cw', 'RefreshCw'],
+  ['rotate-ccw', 'RotateCcw'],
+  ['square', 'Square'],
   ['rss', 'Rss'],
   ['search', 'Search'],
   ['send', 'Send'],

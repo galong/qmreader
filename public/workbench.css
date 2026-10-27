@@ -920,3 +920,56 @@ html { scrollbar-width: thin; scrollbar-color: var(--wb-thumb) transparent; }
   #app #reader #reader-title { font-size: 24px; }
 }
 #app .wb-modes button { white-space: nowrap; flex: none; }
+
+/* AI chat panel: waiting state, failure with retry, a send button that becomes stop, gentler entrance. */
+#app #agent-pane .agent-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 1.75em;
+}
+#app #agent-pane .agent-typing i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-2);
+  animation: wb-typing 1.1s var(--wb-ease) infinite;
+}
+#app #agent-pane .agent-typing i:nth-child(2) { animation-delay: 0.15s; }
+#app #agent-pane .agent-typing i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes wb-typing {
+  0%, 70%, 100% { opacity: 0.25; transform: translateY(0); }
+  35% { opacity: 1; transform: translateY(-2px); }
+}
+#app #agent-pane .agent-msg.pending .agent-msg-body { color: var(--text-2); }
+#app #agent-pane .agent-msg.error .agent-msg-body {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-size: 13.5px;
+}
+#app #agent-pane .agent-msg.error .agent-msg-footer { opacity: 1; }
+#app #agent-pane .agent-msg-retry { color: var(--text-0); }
+#app #agent-pane .agent-msg { animation: wb-msg-in 160ms var(--wb-ease) both; }
+@keyframes wb-msg-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+#app #agent-pane #agent-send {
+  display: grid;
+  place-items: center;
+  flex: none;
+  background: var(--text-0);
+  color: var(--bg-1);
+  transition: opacity var(--wb-dur) var(--wb-ease), transform var(--wb-dur) var(--wb-ease);
+}
+#app #agent-pane #agent-send:hover:not(:disabled) { opacity: 0.86; }
+#app #agent-pane #agent-send:active:not(:disabled) { transform: scale(0.94); }
+#app #agent-pane #agent-send:disabled { opacity: 0.28; cursor: default; }
+#app #agent-pane #agent-send.is-stop .app-icon { fill: currentColor; }
+#app #agent-pane .agent-composer:focus-within { border-color: var(--text-2); }
+@media (hover: none) {
+  #app #agent-pane .agent-msg.assistant .agent-msg-footer { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #app #agent-pane .agent-msg,
+  #app #agent-pane .agent-typing i { animation: none; }
+}

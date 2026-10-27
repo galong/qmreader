@@ -8067,7 +8067,7 @@ function renderAgentMessages(extraPending = false, { preserveScroll = false } = 
   for (const message of messages) {
     const row = document.createElement('div');
     const mine = message.role === 'user' && (message.canDelete || !message.id || (state.me && message.contributorId === state.me.id));
-    row.className = `agent-msg ${message.role}${message.pending ? ' pending' : ''}${mine ? ' mine' : ''}`;
+    row.className = `agent-msg ${message.role}${message.pending ? ' pending' : ''}${message.error ? ' error' : ''}${mine ? ' mine' : ''}`;
     if (message.id) row.id = `chat-${message.id}`;
     const head = document.createElement('div');
     head.className = 'agent-msg-head';
@@ -8102,6 +8102,16 @@ function renderAgentMessages(extraPending = false, { preserveScroll = false } = 
       setButtonIconLabel(copy, 'copy', '复制');
       copy.onclick = () => copyText(message.content, '消息已复制');
       actions.appendChild(copy);
+      if (message.error && message.retryText) {
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'agent-msg-action agent-msg-retry';
+        retry.title = '重新发送这个问题';
+        retry.setAttribute('aria-label', '重新发送这个问题');
+        setButtonIconLabel(retry, 'rotate-ccw', '重试');
+        retry.onclick = () => retryAgentMessage(message);
+        actions.appendChild(retry);
+      }
       if (message.canDelete && message.id) {
         const del = document.createElement('button');
         del.type = 'button';
@@ -8116,7 +8126,9 @@ function renderAgentMessages(extraPending = false, { preserveScroll = false } = 
     }
     const body = document.createElement('div');
     body.className = 'agent-msg-body';
-    body.innerHTML = renderMarkdownLite(message.content);
+    body.innerHTML = message.pending
+      ? '<span class="agent-typing" role="status" aria-label="正在生成"><i></i><i></i><i></i></span>'
+      : renderMarkdownLite(message.content);
     row.appendChild(head);
     row.appendChild(body);
     if (footer.childElementCount) row.appendChild(footer);
@@ -8279,12 +8291,11 @@ function updateAgentControls() {
   else if (!hasKey) input.placeholder = '填写 API Key 后提问';
   else input.placeholder = '问当前文章…';
   input.disabled = !hasEntry || !hasUser || !hasKey || state.agentBusy;
-  send.disabled = !hasEntry || !hasUser || !hasKey || state.agentBusy || !input.value.trim();
-  setElementIcon(send, state.agentBusy ? 'loader-circle' : 'send', {
-    className: state.agentBusy ? 'app-icon app-icon-spin' : 'app-icon',
-  });
-  send.title = state.agentBusy ? '正在生成' : '发送';
-  send.setAttribute('aria-label', state.agentBusy ? '正在生成' : '发送');
+  send.disabled = state.agentBusy ? false : (!hasEntry || !hasUser || !hasKey || !input.value.trim());
+  setElementIcon(send, state.agentBusy ? 'square' : 'send', { className: 'app-icon' });
+  send.title = state.agentBusy ? '停止生成' : '发送';
+  send.setAttribute('aria-label', state.agentBusy ? '停止生成' : '发送');
+  send.classList.toggle('is-stop', Boolean(state.agentBusy));
   if (panel) panel.classList.toggle('agent-busy', Boolean(state.agentBusy));
   $$('.agent-prompt').forEach(btn => { btn.disabled = !hasEntry || !hasUser || !hasKey || state.agentBusy; });
   const copyThread = $('#agent-copy-thread');
@@ -8339,7 +8350,10 @@ async function sendAgentMessage(text) {
   const outboundContent = withAgentContext(content);
   state.agentMessages.push({ role: 'user', author: state.me.displayName, content: outboundContent, createdAt: Date.now() });
   $('#agent-input').value = '';
+  $('#agent-input').style.height = '';
   state.agentBusy = true;
+  const controller = new AbortController();
+  state.agentAbort = controller;
   renderAgentMessages(true);
   updateAgentControls();
 
@@ -8349,18 +8363,44 @@ async function sendAgentMessage(text) {
       aiConfig: agentConfig,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: [{ role: 'user', content: outboundContent }] }),
+      signal: controller.signal,
+      timeoutMs: 120000,
     });
     if (state.activeEntry?.id === entry.id) {
       state.agentMessages = [...state.agentMessages.filter(m => !m.pending), data.assistantMessage || { role: 'assistant', author: 'DeepSeek', content: data.answer }];
       await loadAgentMessages(entry);
     }
   } catch (err) {
-    state.agentMessages.push({ role: 'assistant', author: '系统', content: `对话失败：${err.message}` });
-    if (state.activeEntry?.id === entry.id) renderAgentMessages();
+    if (err && err.name === 'AbortError') {
+      // Stopped by the reader: drop the unsent question from the thread and give the text back.
+      state.agentMessages = state.agentMessages.filter(m => !m.pending && m.content !== outboundContent);
+      if (state.activeEntry?.id === entry.id) {
+        $('#agent-input').value = content;
+        renderAgentMessages();
+      }
+    } else {
+      state.agentMessages.push({ role: 'assistant', author: '系统', content: `对话失败：${err.message}`, error: true, retryText: content });
+      if (state.activeEntry?.id === entry.id) renderAgentMessages();
+    }
   } finally {
+    if (state.agentAbort === controller) state.agentAbort = null;
     state.agentBusy = false;
     updateAgentControls();
   }
+}
+
+function stopAgentMessage() {
+  if (state.agentAbort) state.agentAbort.abort();
+}
+
+function retryAgentMessage(failed) {
+  if (!failed || !failed.retryText || state.agentBusy) return;
+  const index = state.agentMessages.indexOf(failed);
+  if (index < 0) return;
+  // Remove the failure notice and the question that produced it, then ask again.
+  const previous = state.agentMessages[index - 1];
+  state.agentMessages.splice(previous && previous.role === 'user' && !previous.id ? index - 1 : index, previous && previous.role === 'user' && !previous.id ? 2 : 1);
+  sendAgentMessage(failed.retryText);
 }
 
 async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentId = '', annotationId = '', chatMessageId = '', updateUrl = true, replaceUrl = false } = {}) {
@@ -10599,6 +10639,7 @@ $$('.comment-sort-btn').forEach(btn => {
 $('#comment-login').onclick = () => openAuth('login');
 $('#agent-form').onsubmit = (e) => {
   e.preventDefault();
+  if (state.agentBusy) { stopAgentMessage(); return; }
   sendAgentMessage($('#agent-input').value);
 };
 $('#agent-input').oninput = (e) => {
@@ -10607,7 +10648,8 @@ $('#agent-input').oninput = (e) => {
   updateAgentControls();
 };
 $('#agent-input').onkeydown = (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
+  // Enter that confirms an IME candidate must not send the half-typed question.
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
     e.preventDefault();
     sendAgentMessage(e.currentTarget.value);
   }
