@@ -41,7 +41,8 @@
     }, { once: true });
   </script>
   <link rel="stylesheet" href="/web-collection.css?v=1.0.0">
-  <link rel="stylesheet" href="/workbench.css?v=20261027-chat2">
+  <link rel="stylesheet" href="/workbench.css?v=20261028-aiset1">
+  <link rel="stylesheet" href="/ai-settings.css?v=20261028-aiset1">
 </head>
 <body data-theme="light">
   <div id="app">
@@ -592,7 +593,7 @@
           <div class="agent-composer">
             <textarea id="agent-input" rows="2" placeholder="就这篇文章提问…（回车发送，Shift+回车换行）" disabled></textarea>
             <div class="agent-composer-bar">
-              <button id="agent-model-btn" class="agent-model-btn" type="button" aria-haspopup="listbox" aria-expanded="false" title="切换对话模型"><span class="agent-model-tile" aria-hidden="true"></span><span class="agent-model-name">模型</span><span class="agent-model-caret" data-qm-icon="chevron-down" aria-hidden="true"></span></button>
+              <button id="agent-model-btn" class="agent-model-btn" type="button" aria-haspopup="listbox" aria-expanded="false" title="切换对话模型"><span class="agent-model-name">模型</span><span class="agent-model-caret" data-qm-icon="chevrons-up-down" aria-hidden="true"></span></button>
               <span id="agent-count" class="agent-count" aria-live="off"></span>
               <div class="agent-composer-actions">
                 <button id="agent-send" class="ghost-btn" type="submit" title="发送" aria-label="发送" disabled><span data-qm-icon="send"></span></button>
@@ -780,93 +781,37 @@
     <div class="modal-box ai-config-box">
       <header>
         <div>
-          <h2>AI 模型配置</h2>
-          <p>API Key 只保存在当前浏览器，用于你的翻译和文章对话调用。</p>
+          <h2>AI 服务与模型</h2>
+          <p>API Key 只保存在当前浏览器；账号登录的凭证加密保存在服务器。</p>
         </div>
-        <button class="icon-btn" id="ai-config-close" aria-label="关闭 AI 模型配置"><span data-qm-icon="x"></span></button>
+        <button class="icon-btn" id="ai-config-close" aria-label="关闭 AI 服务与模型"><span data-qm-icon="x"></span></button>
       </header>
       <div id="ai-config-modal-mount">
-      <div class="ai-config-content">
-        <aside class="ai-profile-side">
-          <div class="ai-side-head">
-            <span>配置</span>
-            <button id="ai-add-profile" class="ghost-btn" type="button">新增</button>
-          </div>
-          <div id="ai-profile-list" class="ai-profile-list"></div>
-        </aside>
-        <form id="ai-profile-form" class="ai-profile-form">
-          <div id="ai-config-alert" class="ai-config-alert hidden"></div>
-
-          <section class="ai-form-section">
-            <div class="ai-section-head">
-              <span>快捷模板</span>
-              <a id="ai-key-link" class="ai-key-link hidden" target="_blank" rel="noopener">获取 API Key</a>
-            </div>
-            <div id="ai-template-list" class="ai-template-list"></div>
-          </section>
-
-          <section class="ai-form-section">
-            <div class="ai-form-grid two">
-              <label>
-                <span>配置名称</span>
-                <input id="ai-profile-name" type="text" maxlength="48" placeholder="DeepSeek / OpenRouter" required />
-              </label>
-              <label>
-                <span>服务商</span>
-                <input id="ai-provider-name" type="text" maxlength="48" placeholder="DeepSeek" />
-              </label>
-            </div>
-            <div class="ai-form-grid two">
-              <label>
-                <span>Provider ID</span>
-                <input id="ai-provider-id" type="text" maxlength="48" placeholder="deepseek" />
-              </label>
-              <label>
-                <span>分类</span>
-                <input id="ai-provider-category" type="text" maxlength="48" placeholder="国内大模型" />
-              </label>
-            </div>
-            <label>
-              <span>API Key</span>
-              <input id="ai-api-key" type="password" autocomplete="off" placeholder="sk-..." />
-            </label>
-            <label>
-              <span>Base URL</span>
-              <input id="ai-base-url" type="url" placeholder="https://api.deepseek.com/v1" required />
-            </label>
-            <label>
-              <span>模型</span>
-              <input id="ai-model" type="text" placeholder="deepseek-flash" required />
-            </label>
-            <div id="ai-quick-models" class="ai-quick-models"></div>
-            <div class="ai-form-grid three">
-              <label>
-                <span>Temperature</span>
-                <input id="ai-temperature" type="number" min="0" max="2" step="0.1" placeholder="0.7" />
-              </label>
-              <label>
-                <span>Max Tokens</span>
-                <input id="ai-max-tokens" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="2000" />
-              </label>
-              <label class="ai-default-check">
-                <input id="ai-default-profile" type="checkbox" />
-                <span>设为默认</span>
-              </label>
-            </div>
-            <input id="ai-provider-type" type="hidden" value="openai_compatible" />
-            <input id="ai-api-key-url" type="hidden" />
-          </section>
-
-          <div id="ai-config-note" class="settings-note"></div>
-          <div class="ai-form-actions">
-            <button id="ai-fetch-models" class="ghost-btn" type="button">获取模型</button>
-            <button id="ai-test" class="ghost-btn" type="button">测试连接</button>
-            <button id="ai-delete-profile" class="ghost-btn danger" type="button">删除</button>
-            <button id="ai-save-profile" class="ghost-btn primary" type="submit">保存</button>
-          </div>
-        </form>
+      <div class="ai-config-content ai-set">
+        <div id="ai-config-alert" class="ai-config-alert hidden"></div>
+        <section class="ai-set-group">
+          <div class="ai-set-head"><h3>服务商</h3></div>
+          <div id="provider-list"></div>
+          <div class="add-btn"><a id="add-provider-btn" class="pd-add" href="#" role="button">+ 添加服务商</a></div>
+        </section>
+        <section class="ai-set-group">
+          <div class="ai-set-head"><h3>模型</h3></div>
+          <div id="model-list"></div>
+          <div class="add-btn"><a id="add-model-btn" class="pd-add" href="#" role="button">+ 添加模型</a></div>
+        </section>
       </div>
       </div>
+    </div>
+  </div>
+
+  <div id="pd-modal" class="modal pd-modal hidden" role="dialog" aria-modal="true" aria-labelledby="pd-title">
+    <div class="modal-box pd-box">
+      <header>
+        <h2 id="pd-title" class="pd-title"></h2>
+        <button class="icon-btn" id="pd-close" type="button" aria-label="关闭"><span data-qm-icon="x"></span></button>
+      </header>
+      <div class="pd-body"></div>
+      <div class="pd-actions"></div>
     </div>
   </div>
 
@@ -887,10 +832,12 @@
   <div id="toast" class="toast hidden"></div>
 
   <script defer src="/purify.min.js?v=3.4.17"></script>
-  <script defer src="/lucide-icons.js?v=6"></script>
+  <script defer src="/lucide-icons.js?v=7"></script>
   <script defer src="/request-json.js?v=recovery-20261015"></script>
-  <script defer src="/ai-providers.js?v=20261027-release6"></script>
-  <script defer src="/app.js?v=20261027-chat2"></script>
+  <script defer src="/provider-icons.js?v=1"></script>
+  <script defer src="/ai-providers.js?v=20261028-aiset1"></script>
+  <script defer src="/ai-settings.js?v=20261028-aiset1"></script>
+  <script defer src="/app.js?v=20261028-aiset1"></script>
   <script defer src="/podscribe.js?v=6"></script>
   <script defer src="/web-collection.js?v=1.0.0"></script>
   <script defer src="/workbench.js?v=20261027-chat2"></script>

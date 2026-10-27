@@ -1,0 +1,206 @@
+/* AI services and models: icon tiles, the two settings lists, the provider/model dialogs and the chat
+ * model picker. Ported from qiaomu clipper's provider-dialog / clip-chat styles onto QMReader's tokens
+ * (black, white, grey; no side stripes). Rows, cards and chips are divs so button styles cannot stretch them. */
+
+/* ---- icon tiles ---- */
+.provider-tile {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; overflow: hidden;
+  width: 30px; height: 30px; border-radius: 9px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text-0); font-size: 14px; font-weight: 700; line-height: 1;
+}
+.provider-tile svg { width: 62%; height: 62%; }
+.provider-tile.is-sm { width: 22px; height: 22px; border-radius: 7px; font-size: 11px; }
+.provider-tile.is-lg { width: 38px; height: 38px; border-radius: 11px; font-size: 17px; }
+.provider-tile.is-letter { background: hsl(var(--h, 220) 12% 94%); border-color: transparent; color: hsl(var(--h, 220) 10% 30%); }
+.provider-tile.is-plus { border-style: dashed; color: var(--text-2); font-weight: 400; font-size: 20px; }
+[data-theme="dark"] .provider-tile { background: var(--bg-2); }
+[data-theme="dark"] .provider-tile.is-letter { background: hsl(var(--h, 220) 8% 24%); color: hsl(var(--h, 220) 10% 84%); }
+
+/* ---- settings page ---- */
+.ai-config-content.ai-set {
+  display: block;
+  overflow-y: auto;
+  padding: 8px 22px 22px;
+  min-height: 0;
+}
+.ai-set .ai-config-alert { margin: 14px 0 0; }
+.ai-set-group { margin-top: 18px; }
+.ai-set-head h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--text-0); }
+.ai-set-empty { padding: 14px 0; color: var(--text-2); font-size: 12.5px; }
+.provider-list-item, .model-list-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.provider-list-item-info, .model-list-item-info { display: flex; align-items: center; flex: 1; min-width: 0; gap: 12px; }
+.provider-list-text, .model-list-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.provider-name-text, .model-name { font-size: 13.5px; font-weight: 500; color: var(--text-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.provider-list-sub, .model-provider { color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.provider-list-sub.is-warn { color: var(--semantic-red, #b42318); }
+.provider-list-item-actions, .model-list-item-actions { display: flex; align-items: center; flex: none; gap: 2px; }
+.pd-icon-btn {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px;
+  background: transparent; color: var(--text-2); cursor: pointer;
+}
+.pd-icon-btn:hover { background: var(--bg-2); color: var(--text-0); }
+.pd-icon-btn:focus-visible { outline: 1px solid var(--text-2); outline-offset: 1px; }
+.pd-icon-btn .app-icon { width: 15px; height: 15px; }
+.pd-set-default {
+  height: 26px; margin-right: 4px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--text-2); font-size: 12px; cursor: pointer; opacity: 0; transition: opacity 0.12s;
+}
+.model-list-item:hover .pd-set-default, .model-list-item:focus-within .pd-set-default { opacity: 1; }
+.pd-set-default:hover { background: var(--bg-2); color: var(--text-0); }
+@media (hover: none) { .pd-set-default { opacity: 1; } }
+.pd-tag { flex: none; padding: 1px 8px; border-radius: 6px; background: var(--bg-2); color: var(--text-2); font-size: 12px; }
+.pd-tag.is-default { margin-right: 4px; background: var(--bg-3); color: var(--text-1); }
+.add-btn { padding-top: 10px; }
+.pd-add {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+  background: var(--bg-2); color: var(--text-0); font-size: 13px; text-decoration: none;
+}
+.pd-add:hover { background: var(--bg-3); }
+.pd-add:focus-visible { outline: 1px solid var(--text-2); outline-offset: 2px; }
+
+/* ---- dialogs ---- */
+.pd-modal { z-index: 60; }
+.pd-box { width: min(520px, 94vw); max-height: 86vh; }
+.pd-modal.pd-wide .pd-box { width: min(820px, 94vw); }
+.pd-box header { padding: 14px 18px; }
+.pd-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 18px 4px; }
+.pd-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 18px 16px; }
+.pd-actions button, .pd-signin button, .pd-paste button {
+  width: auto; height: 32px; padding: 0 14px; border: 0; border-radius: 8px;
+  background: var(--bg-2); color: var(--text-0); font-size: 13px; cursor: pointer; box-shadow: none;
+}
+.pd-actions button:hover:not(:disabled), .pd-paste button:hover { background: var(--bg-3); }
+.pd-actions button.pd-primary, .pd-signin button.pd-primary { background: var(--text-0); color: var(--surface); }
+.pd-actions button.pd-primary:hover:not(:disabled), .pd-signin button.pd-primary:hover:not(:disabled) { background: var(--text-1); }
+.pd-actions button:disabled, .pd-signin button:disabled { opacity: 0.4; cursor: default; }
+.pd-actions button.pd-ghost { margin-right: auto; background: transparent; color: var(--text-2); }
+.pd-actions button.pd-ghost:hover { background: var(--bg-2); color: var(--text-0); }
+.pd-actions button:focus-visible, .pd-signin button:focus-visible { outline: 1px solid var(--text-2); outline-offset: 2px; }
+
+.pd-search { width: 100%; height: 36px; margin-bottom: 4px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text-0); font-size: 13px; }
+.pd-search:focus { outline: none; border-color: var(--text-2); }
+.pd-group { margin: 16px 2px 8px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.pd-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.pd-card {
+  display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px 14px; border: 1px solid var(--border);
+  border-radius: 12px; background: var(--surface); cursor: pointer; user-select: none;
+}
+.pd-card:hover { background: var(--bg-2); }
+.pd-card:focus-visible { outline: 1px solid var(--text-2); outline-offset: 2px; }
+.pd-card.is-added { opacity: 0.62; }
+.pd-card.is-custom { border-style: dashed; }
+.pd-card-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pd-card-name { font-size: 13.5px; font-weight: 600; color: var(--text-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-card-sub { color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-card-mark { flex: none; color: var(--text-2); }
+.pd-empty { padding: 28px 8px; text-align: center; color: var(--text-2); font-size: 13px; }
+
+.pd-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.pd-head strong { font-size: 16px; color: var(--text-0); }
+.pd-head input { flex: 1; }
+.pd-note { margin: 0 0 12px; color: var(--text-2); font-size: 13px; line-height: 1.55; }
+.pd-note:empty { display: none; }
+.pd-signin { margin-bottom: 8px; }
+.pd-signin-extras { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 4px; }
+.pd-signin-extras:empty { display: none; }
+.pd-box button.pd-link { height: auto; padding: 2px 0; border: 0; background: transparent; color: var(--text-1); font-size: 12.5px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.pd-box button.pd-link:hover { color: var(--text-0); }
+.pd-box button.pd-link.is-danger { color: var(--semantic-red, #b42318); }
+.pd-status { min-height: 1.4em; color: var(--text-2); font-size: 12.5px; line-height: 1.5; }
+.pd-status.is-error { color: var(--semantic-red, #b42318); }
+.pd-status:empty { display: none; }
+.pd-status a { color: var(--text-0); }
+.pd-paste { display: flex; gap: 8px; margin-top: 8px; }
+.pd-paste[hidden] { display: none; }
+.pd-paste input { flex: 1; }
+.pd-input-wrap { position: relative; }
+.pd-field { position: relative; display: flex; flex-direction: column; gap: 4px; margin: 0 0 14px; }
+.pd-field label { color: var(--text-2); font-size: 12.5px; }
+.pd-field input, .pd-head input, .pd-paste input {
+  width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text-0); font-size: 13px;
+}
+.pd-field input:focus, .pd-head input:focus, .pd-paste input:focus { outline: none; border-color: var(--text-2); }
+.pd-field.has-reveal input { padding-right: 56px; }
+.pd-reveal { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--text-2); font-size: 12px; cursor: pointer; user-select: none; }
+.pd-reveal:hover { color: var(--text-0); }
+.pd-reveal:focus-visible { outline: 1px solid var(--text-2); border-radius: 4px; }
+.pd-hint { color: var(--text-2); font-size: 12px; line-height: 1.5; }
+.pd-hint a { color: var(--text-0); text-decoration: underline; text-underline-offset: 2px; }
+.pd-more { margin: 4px 0 10px; }
+.pd-more summary { padding: 4px 0; color: var(--text-2); font-size: 12.5px; cursor: pointer; list-style: none; user-select: none; }
+.pd-more summary::-webkit-details-marker { display: none; }
+.pd-more summary::before { content: '›'; display: inline-block; width: 1em; transition: transform 0.15s; }
+.pd-more summary:hover { color: var(--text-0); }
+.pd-more[open] > summary::before { transform: rotate(90deg); }
+
+.pd-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.pd-chips[hidden] { display: none; }
+.pd-chip {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 8px; border: 1px solid var(--border);
+  border-radius: 999px; background: var(--surface); font-size: 13px; cursor: pointer; user-select: none;
+}
+.pd-chip:hover { background: var(--bg-2); }
+.pd-chip.is-on { border-color: var(--text-0); box-shadow: 0 0 0 1px var(--text-0); }
+.pd-chip:focus-visible { outline: 1px solid var(--text-2); outline-offset: 2px; }
+.pd-models { display: flex; flex-direction: column; max-height: 320px; margin: 6px 0; overflow: auto; border-radius: 10px; }
+.pd-model { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 8px; cursor: pointer; user-select: none; }
+.pd-model:hover { background: var(--bg-2); }
+.pd-model.is-picked { background: var(--bg-2); }
+.pd-model.is-added { opacity: 0.55; cursor: default; }
+.pd-model:focus-visible { outline: 1px solid var(--text-2); outline-offset: -2px; }
+.pd-check {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px;
+  border: 1.5px solid var(--border); border-radius: 5px; font-size: 12px; line-height: 1;
+}
+.pd-model.is-picked .pd-check { background: var(--text-0); border-color: var(--text-0); color: var(--surface); }
+.pd-model-text { flex: 1; min-width: 0; }
+.pd-model-name { font-size: 13px; color: var(--text-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-model-id { color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-retry { color: var(--text-0); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+
+@media (max-width: 760px) {
+  .ai-config-content.ai-set { padding: 4px 14px 18px; }
+  .pd-cards { grid-template-columns: 1fr; }
+}
+
+/* ---- chat model picker (clipper's model-picker) ---- */
+.agent-model-pop { padding: 0; }
+.clip-picker-search {
+  display: flex; align-items: center; gap: 8px; flex: none; height: 42px; padding: 0 14px;
+  border-bottom: 1px solid var(--border-subtle); color: var(--text-2);
+}
+.clip-picker-search .app-icon { flex: none; width: 15px; height: 15px; }
+.clip-picker-search input {
+  flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; box-shadow: none;
+  color: var(--text-0); font-size: 13.5px; outline: none;
+}
+.clip-picker-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 0 6px; }
+.clip-picker-group {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 12px 14px 5px;
+  background: var(--surface); color: var(--text-2); font-size: 12px; font-weight: 500;
+}
+.clip-picker-provider { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clip-picker-note { margin-left: auto; flex: none; color: var(--text-2); font-size: 11px; font-weight: 400; opacity: 0.8; }
+.clip-picker-row { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 14px; font-size: 13.5px; color: var(--text-0); cursor: pointer; }
+.clip-picker-row.is-active { background: var(--bg-2); }
+.clip-picker-row.is-current .clip-picker-name { font-weight: 600; }
+.clip-picker-check { flex: none; display: inline-flex; justify-content: center; width: 18px; }
+.clip-picker-check .app-icon { width: 14px; height: 14px; }
+.clip-picker-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clip-picker-empty { padding: 24px 14px; text-align: center; color: var(--text-2); font-size: 13px; }
+.clip-picker-footer { flex: none; padding: 8px; border-top: 1px solid var(--border-subtle); }
+#app #agent-pane .clip-picker-manage {
+  display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 32px; margin: 0; padding: 0 12px;
+  border: 0; border-radius: 8px; background: var(--bg-2); box-shadow: none; color: var(--text-0); font-size: 13px; cursor: pointer;
+}
+#app #agent-pane .clip-picker-manage:hover { background: var(--bg-3); }
+.clip-picker-manage .app-icon { width: 14px; height: 14px; }
+
+/* the settings dialog is a short two-list page now, not a two-column form */
+#ai-config-modal .ai-config-box { width: min(640px, 94vw); height: auto; max-height: 86vh; }
+#ai-config-modal #ai-config-modal-mount { overflow: hidden; }
+.pd-modal .pd-search, .pd-modal .pd-field input, .pd-modal .pd-head input, .pd-modal .pd-paste input { background: var(--surface); color: var(--text-0); }

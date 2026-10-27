@@ -1074,19 +1074,6 @@ html { scrollbar-width: thin; scrollbar-color: var(--wb-thumb) transparent; }
 .agent-model-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-model-caret { display: inline-flex; flex: none; opacity: 0.6; }
 .agent-model-caret .app-icon { --icon-size: 12px; width: 12px; height: 12px; }
-.agent-model-tile {
-  flex: none;
-  display: inline-grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 5px;
-  background: var(--bg-3);
-  color: var(--text-1);
-  font-size: 10px;
-  font-weight: 650;
-  line-height: 1;
-}
 .agent-model-pop {
   position: absolute;
   left: 0;
@@ -1104,47 +1091,4 @@ html { scrollbar-width: thin; scrollbar-color: var(--wb-thumb) transparent; }
   animation: wb-msg-in 120ms var(--wb-ease) both;
 }
 .agent-model-pop[hidden] { display: none; }
-.agent-model-group { padding: 10px 14px 4px; color: var(--text-2); font-size: 12px; font-weight: 500; }
-.agent-model-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px 6px 6px; }
-#app #agent-pane .agent-model-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 34px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  box-shadow: none;
-  color: var(--text-0);
-  font-size: 13px;
-  text-align: left;
-}
-#app #agent-pane .agent-model-row:hover,
-#app #agent-pane .agent-model-row:focus-visible { background: var(--bg-2); outline: none; }
-#app #agent-pane .agent-model-row.is-current .agent-model-row-name { font-weight: 600; }
-.agent-model-row.is-unset .agent-model-row-name { color: var(--text-2); }
-.agent-model-row-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent-model-row-meta { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: 12px; }
-.agent-model-check { flex: none; display: inline-flex; width: 16px; justify-content: center; color: var(--text-0); }
-.agent-model-check .app-icon { --icon-size: 14px; width: 14px; height: 14px; }
-.agent-model-empty { margin: 0; padding: 14px; color: var(--text-2); font-size: 12.5px; text-align: center; }
-.agent-model-foot { flex: none; padding: 6px; border-top: 1px solid var(--border-subtle); }
-#app #agent-pane .agent-model-manage {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  height: 32px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--bg-2);
-  box-shadow: none;
-  color: var(--text-0);
-  font-size: 12.5px;
-}
-#app #agent-pane .agent-model-manage:hover { background: var(--bg-3); }
-.agent-model-manage .app-icon { --icon-size: 14px; width: 14px; height: 14px; }
 @media (prefers-reduced-motion: reduce) { .agent-model-pop { animation: none; } }
