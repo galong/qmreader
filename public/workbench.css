@@ -301,7 +301,7 @@ body[data-theme="light"] #app > #reader-pane { background: var(--surface); }
 /* sidebar: wider so the brand never truncates; quiet submit row */
 #app { --sidebar-width: 220px; }
 #app.sidebar-collapsed { --sidebar-width: 64px; }
-#app .brand-name { font-size: 13px; letter-spacing: -0.01em; }
+#app .brand-name { font-size: 14px; letter-spacing: -0.01em; }
 #app #sidebar #submit-link-open {
   background: transparent;
   color: var(--text-1);
@@ -648,3 +648,5 @@ body[data-theme="light"] #app > #reader-pane { background: var(--surface); }
 }
 
 #app .entry-card.read .entry-summary { opacity: 1; }
+
+#app #sidebar .brand .brand-home { gap: 6px; }
