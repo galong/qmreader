@@ -33,6 +33,11 @@
   const actions = $('.wb-actions', bar);
 
   // Primary actions: star (moved), focus (moved), AI companion (new).
+  // Move the existing action so permission, loading and click handling stay intact.
+  const rewriteAction = $('#reader-rewrite');
+  const rewriteActionSlot = make('div', 'wb-rewrite-slot hidden');
+  if (rewriteAction) rewriteActionSlot.appendChild(rewriteAction);
+  actions.appendChild(rewriteActionSlot);
   const star = $('#reader-star');
   const immersive = $('#reader-immersive');
   if (star) actions.appendChild(star);
@@ -174,6 +179,7 @@
   };
   const syncModes = () => {
     const mode = currentMode();
+    rewriteActionSlot.classList.toggle('hidden', mode !== 'rewrite' || !rewriteAction || rewriteAction.classList.contains('hidden'));
     modeButtons.forEach(btn => btn.setAttribute('aria-pressed', btn.dataset.wbMode === mode ? 'true' : 'false'));
     const label = $('.reader-tab[data-tab="rewrite"]')?.textContent?.trim();
     const rewriteBtn = modeButtons.find(btn => btn.dataset.wbMode === 'rewrite');
@@ -288,6 +294,7 @@
     ['#reader-original-panel', { attributes: true, attributeFilter: ['class'] }],
     ['#reader-translation', { attributes: true, attributeFilter: ['class'] }],
     ['#reader-rewrite-panel', { attributes: true, attributeFilter: ['class'] }],
+    ['#reader-rewrite', { attributes: true, attributeFilter: ['class'] }],
     ['#reader-source', { childList: true, subtree: true, characterData: true }],
     ['#reader-title', { childList: true, subtree: true, characterData: true }],
     ['.reader-tab[data-tab="rewrite"]', { childList: true, characterData: true, subtree: true }],

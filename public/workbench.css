@@ -14,13 +14,19 @@
   --text-1: #4c4c48;
   --text-2: #85857f;
   --signal: #2563c9;
-  --focus-ring: #2563c9;
+  --focus-ring: var(--text-1);
 }
 [data-theme="dark"] {
   --signal: #6b9bff;
-  --focus-ring: #6b9bff;
+  --focus-ring: var(--text-1);
 }
-:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+/* Pointer clicks remain quiet; keyboard navigation keeps one crisp indicator. */
+#app :is(button, a, summary, [role="button"]):focus:not(:focus-visible) { outline: none; }
+#app :is(button, a, summary, [role="button"]):focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 2px;
+  box-shadow: none;
+}
 
 /* ---------- layout ---------- */
 #app {
@@ -68,11 +74,11 @@
 #app .asset-dashboard-open strong { color: var(--text-1); font-weight: 600; }
 
 /* ---------- list ---------- */
-#app #entry-pane { background: var(--bg-1); }
+#app #entry-pane { --wb-list-gutter: 16px; background: var(--bg-1); }
 #app .list-scope-bar {
   display: flex;
   gap: 2px;
-  margin: 8px 12px 0;
+  margin: 8px var(--wb-list-gutter) 0;
   padding: 3px;
   background: var(--bg-2);
   border-radius: 8px;
@@ -92,8 +98,13 @@
   font-weight: 600;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
-#app .entry-card { border-radius: 8px; }
-#app .entry-card.active { background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
+#app #entry-pane .entry-card { border: 0; border-radius: 0; }
+#app #entry-pane .entry-card.active { background: var(--bg-2); box-shadow: none; }
+#app #entry-pane .entry-card:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -2px;
+  box-shadow: none;
+}
 #app .entry-card.read .entry-title { color: var(--text-1); font-weight: 500; }
 #app .entry-card:not(.read) .entry-title { color: var(--text-0); font-weight: 650; }
 #app .unread-dot { background: var(--signal); }
@@ -317,16 +328,36 @@ body[data-theme="light"] #app > #reader-pane { background: var(--surface); }
 #app .feed-item .err-dot { opacity: 0.6; }
 
 /* list: calmer header, A-style rows */
-#app .pane-header { padding-top: 12px; }
+#app #entry-pane > .pane-header { padding: 12px var(--wb-list-gutter) 10px; }
 #app .entry-pane-tabs { margin: 6px 12px 0; padding: 0; border: 0; gap: 14px; }
 #app .entry-pane-tab { font-size: 12.5px; color: var(--text-2); padding: 8px 0; }
 #app .entry-pane-tab.active { color: var(--text-0); font-weight: 600; }
-#app .entry-list { padding: 4px 6px 16px; }
-#app .entry-card { padding: 11px 12px 12px 22px; margin: 0 0 2px; }
+#app #entry-pane .entry-list { padding: 4px 0 16px; scrollbar-gutter: stable; }
+#app #entry-pane .entry-card {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px var(--wb-list-gutter);
+  margin: 0;
+}
+#app #entry-pane .entry-card:has(.entry-media) { grid-template-columns: minmax(0, 1fr) auto; }
+#app #entry-pane .entry-main { grid-column: 1; }
+#app #entry-pane .entry-media { grid-column: 2; }
+#app #entry-pane .entry-card .unread-dot {
+  position: absolute;
+  grid-column: auto;
+  grid-row: auto;
+  left: 5px;
+  top: 49px;
+  width: 5px;
+  height: 5px;
+  margin: 0;
+}
+@media (max-width: 760px) {
+  #app #entry-pane .entry-list { padding-bottom: calc(var(--qm-tabbar-h) + var(--qm-safe-bottom) + 16px); }
+}
 #app .entry-card:hover { background: rgba(17, 17, 17, 0.04); }
-#app .entry-card.active:hover { background: var(--surface); }
+#app #entry-pane .entry-card.active:hover { background: var(--bg-2); }
 [data-theme="dark"] #app .entry-card:hover { background: rgba(255, 255, 255, 0.05); }
-#app .entry-card .unread-dot { left: 9px; }
 #app .entry-source-line .src { font-size: 12px; color: var(--text-2); }
 #app .entry-time { font-size: 12px; color: var(--text-2); }
 #app .entry-card .entry-title { margin-top: 5px; font-size: 14.5px; line-height: 1.45; }
@@ -495,7 +526,7 @@ body[data-theme="light"] #app > #reader-pane { background: var(--surface); }
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
-  margin: 10px 14px 2px;
+  margin: 10px var(--wb-list-gutter) 2px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border-subtle);
   font-size: 12px;
@@ -650,3 +681,51 @@ body[data-theme="light"] #app > #reader-pane { background: var(--surface); }
 #app .entry-card.read .entry-summary { opacity: 1; }
 
 #app #sidebar .brand .brand-home { gap: 4px; }
+
+/* Draw one hairline while retaining a generous draggable separator target. */
+#app #list-resizer,
+#app #context-resizer {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: var(--surface);
+  box-shadow: none;
+  touch-action: none;
+}
+#app #list-resizer::before,
+#app #context-resizer::before { content: ""; position: absolute; inset: 0 -4px; z-index: 2; }
+#app #list-resizer::after,
+#app #context-resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 1px;
+  border-radius: 0;
+  background: var(--border-subtle);
+}
+#app #list-resizer:hover::after,
+#app #context-resizer:hover::after,
+#app #list-resizer:focus-visible::after,
+#app #context-resizer:focus-visible::after,
+#app.is-resizing #list-resizer::after,
+#app.is-context-resizing #context-resizer::after { background: var(--text-2); }
+#app #agent-pane { border-left: 0; }
+
+/* Regenerate belongs to the toolbar, never between the title and first paragraph. */
+#app .wb-rewrite-slot { display: flex; }
+#app .wb-rewrite-slot.hidden { display: none; }
+#app .wb-rewrite-slot > #reader-rewrite {
+  height: 30px;
+  min-width: 48px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--text-0);
+  color: var(--surface);
+  font-size: 12px;
+  white-space: nowrap;
+  box-shadow: none;
+}
+#app .wb-rewrite-slot > #reader-rewrite:hover:not(:disabled) { opacity: 0.85; }
+#app #reader #reader-rewrite-panel > .reader-section-head { display: none; }
