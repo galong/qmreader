@@ -78,6 +78,11 @@
 .pd-actions button:disabled, .pd-signin button:disabled { opacity: 0.4; cursor: default; }
 .pd-actions button.pd-ghost { margin-right: auto; background: transparent; color: var(--text-2); }
 .pd-actions button.pd-ghost:hover { background: var(--bg-2); color: var(--text-0); }
+.pd-actions button.pd-test { background: transparent; color: var(--text-1); }
+.pd-actions button.pd-test:hover:not(:disabled) { background: var(--bg-2); color: var(--text-0); }
+.pd-actions button.pd-ghost + button.pd-test { margin-right: 0; }
+.pd-actions > button.pd-test:first-child { margin-right: auto; }
+.pd-test-status:empty { display: none; }
 .pd-actions button:focus-visible, .pd-signin button:focus-visible { outline: 1px solid var(--text-2); outline-offset: 2px; }
 
 .pd-search { width: 100%; height: 36px; margin-bottom: 4px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text-0); font-size: 13px; }
