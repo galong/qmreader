@@ -32,3 +32,16 @@
 - ChatGPT/Codex/OpenRouter/词元跳动登录功能继续遵循 AI_OAUTH_ENABLED 默认关闭；不自动修改生产密钥或开启账户托管。
 - OAuth 加密、用户隔离与刷新经过模拟端点测试；没有使用真人账号完成外部服务商登录。
 - 按 scripts/deploy-release.py 发布准确 main SHA；scripts/apply-release.py 备份代码和依赖，保留数据/配置，健康失败自动回滚。
+
+## 1.0.7 阅读界面修复（2026-10-27）
+
+- 移除 styles.css 中旧的滚动时间轴进度条，保留工作台顶栏的一条进度线。
+- 按 W3C C45 使用 focus-visible：鼠标点击不画 outline，键盘保留单层 1px 中性色焦点；不调用 blur，不改变键盘顺序。
+- 参照 Carbon spacing 的 4/8px 尺度，将搜索、筛选、列表标题与文章文字左基线统一到 16px。旧列表为约 47px（内边距与未读专用 grid 列叠加）；未读点放入侧边留白，移除活动行双边框和圆角卡片。
+- 两侧分栏仅绘制 1px 线，保留拖动命中范围；发现并修复分栏方向键冒泡到文章切换的问题。新增两个行为测试，旧代码均失败，修复后通过。
+- 将原有重写按钮节点移动到顶栏收藏前，保留权限、事件与加载状态；原文/译文隐藏该按钮，中文模式按原权限显示。收掉正文操作行，实测标题容器到正文 18px。
+- 本地 151 项 Node 测试、8 项可靠性测试、3 项 Python 检查通过；依赖审计 0 漏洞。
+- Ego 浏览器隔离 QA 数据验证：单进度、鼠标与 Tab 焦点、管理员重写/普通读者隐藏、模式切换、双侧栏、分栏键盘操作、375px 列表及 375/320px 阅读工具栏无横向溢出。窄屏是浏览器模拟，未做物理手机验收。
+- 更新变更资源的版本 URL，避免 immutable 缓存继续使用旧 CSS/JS。
+- 参考：https://www.w3.org/WAI/WCAG22/Techniques/css/C45.html ，https://www.carbondesignsystem.com/building-blocks/foundations/spacing/overview 。
+- 线上部署与最终 CI 以 1.0.7 发布回执为准。

@@ -10050,6 +10050,7 @@ function setupListResizer() {
   resizer.addEventListener('keydown', (e) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
     e.preventDefault();
+    e.stopPropagation();
     const bounds = entryPaneWidthBounds();
     const current = state.entryPaneWidth || $('#entry-pane').getBoundingClientRect().width;
     if (e.key === 'Home') setEntryPaneWidth(bounds.min);
@@ -10088,6 +10089,7 @@ function setupContextResizer() {
   resizer.addEventListener('keydown', (e) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
     e.preventDefault();
+    e.stopPropagation();
     const bounds = contextPaneWidthBounds();
     const current = state.contextPaneWidth || $('#agent-pane').getBoundingClientRect().width;
     if (e.key === 'Home') setContextPaneWidth(bounds.min);
