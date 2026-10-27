@@ -8351,6 +8351,7 @@ async function sendAgentMessage(text) {
   state.agentMessages.push({ role: 'user', author: state.me.displayName, content: outboundContent, createdAt: Date.now() });
   $('#agent-input').value = '';
   $('#agent-input').style.height = '';
+  $('#agent-count').textContent = '';
   state.agentBusy = true;
   const controller = new AbortController();
   state.agentAbort = controller;
@@ -9448,6 +9449,65 @@ function renderAiProfileControls() {
   renderAiProfileSelect('#translation-profile-select', 'translation');
   renderAiProfileSelect('#rewrite-profile-select', 'rewrite');
   renderAiProfileSelect('#agent-profile-select', 'agent');
+  renderAgentModelButton();
+}
+
+function aiProfileInitial(profile) {
+  const name = String(profile && (profile.name || profile.providerName) || 'AI').trim();
+  return Array.from(name)[0] || 'A';
+}
+
+function aiProfileHue(profile) {
+  const name = String(profile && (profile.providerName || profile.name) || '');
+  let hash = 0;
+  for (const ch of name) hash = (hash * 31 + ch.codePointAt(0)) % 360;
+  return hash;
+}
+
+function agentModelTile(profile) {
+  return `<span class="agent-model-tile is-letter" style="--h:${aiProfileHue(profile)}">${escapeHtml(aiProfileInitial(profile))}</span>`;
+}
+
+function renderAgentModelButton() {
+  const btn = $('#agent-model-btn');
+  if (!btn) return;
+  const profile = aiProfileForPurpose('agent');
+  const model = String(profile && profile.model || '').trim();
+  const usable = Boolean(profile && (profile.apiKey || profile.oauthAccountId));
+  btn.innerHTML = `${agentModelTile(profile)}<span class="agent-model-name">${escapeHtml(model || profile.name || '选择模型')}</span><span class="agent-model-caret">${lucideIcon('chevron-down')}</span>`;
+  btn.title = `当前：${profile.name || 'AI 配置'}${model ? ` · ${model}` : ''}${usable ? '' : '（未配置）'}`;
+  btn.classList.toggle('is-unset', !usable);
+  btn.disabled = !state.me;
+  if (!$('#agent-model-pop')?.hidden) renderAgentModelPopover();
+}
+
+function renderAgentModelPopover() {
+  const pop = $('#agent-model-pop');
+  if (!pop) return;
+  const current = aiProfileForPurpose('agent');
+  const rows = state.aiProfiles.map(item => {
+    const usable = Boolean(item.apiKey || item.oauthAccountId);
+    const model = String(item.model || '').trim();
+    return `<button class="agent-model-row${item.id === current.id ? ' is-current' : ''}${usable ? '' : ' is-unset'}" type="button" role="option" aria-selected="${item.id === current.id}" data-agent-profile="${escapeHtml(item.id)}">
+      ${agentModelTile(item)}
+      <span class="agent-model-row-name">${escapeHtml(item.name || item.providerName || 'AI 配置')}</span>
+      <span class="agent-model-row-meta">${escapeHtml(usable ? model : '未配置')}</span>
+      <span class="agent-model-check">${item.id === current.id ? lucideIcon('check') : ''}</span>
+    </button>`;
+  }).join('');
+  pop.innerHTML = `<div class="agent-model-group">已连接的服务</div><div class="agent-model-list">${rows || '<p class="agent-model-empty">还没有模型配置</p>'}</div>
+    <div class="agent-model-foot"><button class="agent-model-manage" type="button" data-agent-model-manage>${lucideIcon('settings')}<span>管理模型</span></button></div>`;
+}
+
+function setAgentModelPopover(open) {
+  const pop = $('#agent-model-pop');
+  const btn = $('#agent-model-btn');
+  if (!pop || !btn) return;
+  if (open && !state.me) return;
+  if (open) renderAgentModelPopover();
+  pop.hidden = !open;
+  btn.setAttribute('aria-expanded', String(Boolean(open)));
+  if (open) pop.querySelector('.is-current, .agent-model-row')?.scrollIntoView({ block: 'nearest' });
 }
 
 function setAiProfileForPurpose(purpose, profileId) {
@@ -10645,6 +10705,8 @@ $('#agent-form').onsubmit = (e) => {
 $('#agent-input').oninput = (e) => {
   e.target.style.height = 'auto';
   e.target.style.height = `${Math.min(e.target.scrollHeight, 170)}px`;
+  const length = e.target.value.length;
+  $('#agent-count').textContent = length > 200 ? String(length) : '';
   updateAgentControls();
 };
 $('#agent-input').onkeydown = (e) => {
@@ -10660,6 +10722,20 @@ $('#agent-open').onclick = () => setContextPanel(state.contextPanel, { expand: t
 const agentCopyThread = $('#agent-copy-thread');
 if (agentCopyThread) agentCopyThread.onclick = copyAgentThread;
 $('#agent-settings').onclick = () => openAiConfigModal('settings');
+$('#agent-model-btn').onclick = (e) => {
+  e.stopPropagation();
+  setAgentModelPopover($('#agent-model-pop').hidden);
+};
+$('#agent-model-pop').onclick = (e) => {
+  e.stopPropagation();
+  const row = e.target.closest('[data-agent-profile]');
+  if (row) { setAiProfileForPurpose('agent', row.dataset.agentProfile); setAgentModelPopover(false); return; }
+  if (e.target.closest('[data-agent-model-manage]')) { setAgentModelPopover(false); openAiConfigModal('settings'); }
+};
+document.addEventListener('click', () => setAgentModelPopover(false));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('#agent-model-pop').hidden) { setAgentModelPopover(false); $('#agent-model-btn').focus(); }
+});
 const agentProfileSelect = $('#agent-profile-select');
 if (agentProfileSelect) agentProfileSelect.onchange = (e) => setAiProfileForPurpose('agent', e.target.value);
 const translationProfileSelect = $('#translation-profile-select');
