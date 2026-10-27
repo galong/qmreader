@@ -3877,6 +3877,23 @@ function closeSubmitLinkModal() {
   $('#submit-link-modal').classList.add('hidden');
 }
 
+async function showSubmittedLinkResult(data, { markdown = '' } = {}) {
+  if (data.pending) {
+    toast(markdown ? '已进入审核队列，通过后公开提交的正文' : '已进入审核队列，通过后才会抓取和公开');
+    return;
+  }
+  const message = data.duplicate ? '该链接已收录到本站' : '已收录到本站';
+  toast(message + (data.rewriteQueued ? '，已安排生成中文改写' : ''));
+  try {
+    await Promise.all([loadSources(), loadEntries(), loadContributors()]);
+    updateListTitle();
+    renderList();
+    renderSidebar();
+  } catch {
+    toast(message + '，列表刷新失败，请刷新页面查看', 5000);
+  }
+}
+
 async function submitReaderLink() {
   if (!requireAuth('login')) return;
   const url = $('#submit-link-url').value.trim();
@@ -3897,7 +3914,7 @@ async function submitReaderLink() {
       body: JSON.stringify({ url, title, markdown, note }),
     });
     closeSubmitLinkModal();
-    if (data.pending) toast(markdown ? '已进入审核队列，通过后公开提交的正文' : '已进入审核队列，通过后才会抓取和公开');
+    await showSubmittedLinkResult(data, { markdown });
   } catch (err) {
     toast('提交失败: ' + err.message, 5000);
   } finally {
@@ -5606,16 +5623,12 @@ async function submitArticleLinkToSite() {
   if (state.articleLinkSubmitting) return;
   state.articleLinkSubmitting = true;
   try {
-    await api('/api/submit-link', {
+    const data = await api('/api/submit-link', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, note }),
     });
-    await Promise.all([loadSources(), loadEntries(), loadContributors()]);
-    updateListTitle();
-    renderList();
-    renderSidebar();
-    toast('已收录到本站，正在生成中文改写');
+    await showSubmittedLinkResult(data);
   } catch (err) {
     toast('收录失败: ' + err.message, 5000);
   } finally {
@@ -10824,6 +10837,12 @@ function moveReaderVersion(delta) {
 document.addEventListener('keydown', (e) => {
   const editable = isShortcutEditableTarget(e.target);
   if (e.key === 'Escape') {
+    if (state.readerPrefsOpen) {
+      e.preventDefault();
+      setReaderPrefsOpen(false);
+      $('#reader-prefs-toggle').focus({ preventScroll: true });
+      return;
+    }
     if (window.QMAiSettings && QMAiSettings.hasDialog()) { QMAiSettings.closeDialog(); return; }
     if (state.readerImmersive) setReaderImmersive(false);
     setReaderPrefsOpen(false);

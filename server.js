@@ -3495,7 +3495,16 @@ app.post('/api/submit-link', requireLogin, submitLinkRateLimit, submitLinkDailyR
   if (!url) return res.status(400).json({ error: '请填写要提交的链接' });
   try {
     const submitter = req.user;
-    const request = await fetcher.queueSubmittedLink(url, submitter, { note, title: req.body.title, markdown: req.body.markdown });
+    const options = { note, title: req.body.title, markdown: req.body.markdown };
+    if (submitter.role === 'admin') {
+      const existing = fetcher.getSubmittedEntryByUrl(url);
+      const entry = await fetcher.submitLink(url, submitter, options);
+      const rewriteQueued = !rewriteResponse(entry) && deepseek.getConfig().configured;
+      void translateSubmittedTitle(entry);
+      if (rewriteQueued) queueSubmittedRewrite(entry);
+      return res.status(existing ? 200 : 201).json({ pending: false, duplicate: Boolean(existing), entry, rewriteQueued });
+    }
+    const request = await fetcher.queueSubmittedLink(url, submitter, options);
     res.status(202).json({ pending: true, request });
   } catch (e) {
     sendError(res, e, 'submit link failed');
