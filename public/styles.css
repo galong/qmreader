@@ -10327,3 +10327,61 @@ button:disabled { cursor: not-allowed; opacity: 0.62; }
 .reader-title-link,
 .reader-title-link:visited { color: inherit; text-decoration: none; }
 .reader-title-link:hover { text-decoration: underline; text-decoration-color: var(--qm-accent, #171717); text-underline-offset: 0.18em; }
+
+/* AI provider gallery search, account sign-in panel, key detection hint */
+.ai-template-search {
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--text-0);
+  font-size: 12.5px;
+}
+.ai-template-search:focus { outline: none; border-color: var(--text-2); }
+.ai-template[hidden], .ai-template-group[hidden] { display: none; }
+.ai-template.is-off { opacity: 0.5; }
+.ai-template-empty { color: var(--text-2); font-size: 12px; padding: 6px 0; }
+.ai-signin-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-2);
+}
+.ai-signin-panel[hidden], .ai-detect-hint[hidden], .ai-signin-paste[hidden] { display: none; }
+.ai-signin-note, .ai-signin-hint { color: var(--text-2); font-size: 12px; line-height: 1.6; }
+.ai-signin-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ai-signin-status { color: var(--text-1); font-size: 12.5px; line-height: 1.5; }
+.ai-signin-status.is-error { color: var(--text-0); font-weight: 650; }
+.ai-signin-paste { display: grid; gap: 6px; }
+.ai-signin-paste input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-1, var(--bg-2));
+  color: var(--text-0);
+  font-size: 12.5px;
+}
+.ai-detect-hint {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-size: 12px;
+}
+.ai-detect-apply {
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-0);
+  font: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.ai-profile-form label[hidden] { display: none; }
