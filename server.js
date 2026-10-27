@@ -3472,7 +3472,13 @@ app.post('/api/entry/:id/reaction', requireLogin, (req, res) => {
 });
 
 // Mount after JSON parsing and before routes. Uses QMReader's existing SSRF/redirect checks.
-require('./lib/lab-moderation').mountLabModeration(app, { store, deleteEntry: fetcher.deleteEntry });
+require('./lib/lab-moderation').mountLabModeration(app, {
+  store, deleteEntry: fetcher.deleteEntry, getSources: fetcher.getSourcesMeta,
+  moveEntry: (id, sourceId, userId) => {
+    const result = require('./lib/entry-placement.cjs').placement(fetcher.getSourceById).move(id, sourceId, userId);
+    publicApiCache.clear(); return result;
+  },
+});
 require('./lib/lab-collection').mountLabCollection(app, {
   adminAuth: store,
   directory: path.join(__dirname, 'data'),

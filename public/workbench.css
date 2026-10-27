@@ -622,3 +622,13 @@ body[data-theme="light"] #app > #reader-pane { background: var(--surface); }
 #app.reading.left-collapsed #reader-pane,
 #app.reading.agent-collapsed #reader-pane,
 #app.reader-immersive #reader-pane { background: var(--surface); }
+
+/* Buttons moved from the former menu retain the same compact toolbar geometry. */
+#app .wb-actions kbd { display: none; }
+#app .wb-actions .ghost-btn { box-shadow: none; }
+#app .wb-prefs-wrap > #reader-prefs-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; min-width: 32px; height: 32px; padding: 0;
+  border: 0; border-radius: 7px; background: transparent; color: var(--text-1);
+}
+#app .wb-prefs-wrap > #reader-prefs-toggle:hover { background: var(--bg-2); }

@@ -312,3 +312,23 @@ test('legacy aigocode "codex" / "anthropic" profiles with an API key keep workin
   const official = deepseek.getConfig({ provider: 'anthropic-official', providerType: 'anthropic_compatible', apiKey: 'sk-ant-x', baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-5' });
   assert.equal(official.providerType, 'anthropic_compatible');
 });
+
+test('Responses stream must finish before partial text can be accepted', async () => {
+  deepseek.setOAuthResolver(async () => ({ kind: 'codex', access: 'test', base: 'https://chatgpt.com/backend-api/codex' }));
+  const f = withFetch(() => new Response('data: {"type":"response.output_text.delta","delta":"unfinished"}\n\n', { status: 200 }));
+  try {
+    const config = deepseek.getConfig({ provider: 'codex-account', oauthAccountId: 'acct', oauthUserId: 'u', model: 'test' });
+    await assert.rejects(deepseek.__test.postChatCompletion(config, { messages: [{ role: 'user', content: 'test' }] }), /未完成|不完整/);
+  } finally { f.restore(); deepseek.setOAuthResolver(null); }
+});
+
+test('account requests remain private BYOK when the website gateway is configured', t => {
+  const previous = process.env.SITE_MAGPIE_API_KEY;
+  process.env.SITE_MAGPIE_API_KEY = 'site-test-only';
+  t.after(() => { if (previous === undefined) delete process.env.SITE_MAGPIE_API_KEY; else process.env.SITE_MAGPIE_API_KEY = previous; });
+  const config = deepseek.getConfig({ provider: 'codex-account', oauthAccountId: 'acct', oauthUserId: 'user', model: 'selected-model' });
+  assert.equal(config.usesOAuth, true);
+  assert.equal(config.usesServerMagpieKey, undefined);
+  assert.equal(config.model, 'selected-model');
+  assert.throws(() => deepseek.getConfig({ provider: 'codex-account' }), /登录/);
+});

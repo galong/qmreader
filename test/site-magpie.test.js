@@ -21,8 +21,8 @@ test('operator deadline switches at the exact boundary, surviving a fresh config
   env(t, 'SITE_MAGPIE_ARGON_UNTIL', '2026-10-21T00:00:00Z');
   const until = Date.parse(process.env.SITE_MAGPIE_ARGON_UNTIL);
   assert.equal(siteMagpieConfig({}, until - 1).model, ARGON);
-  assert.equal(siteMagpieConfig({}, until).model, FLASH);
-  assert.equal(siteMagpieConfig({}, until + 86400000).model, FLASH);
+  assert.equal(siteMagpieConfig({}, until).model, 'opencode-go/deepseek-v4.1-flash');
+  assert.equal(siteMagpieConfig({}, until + 86400000).model, 'opencode-go/deepseek-v4.1-flash');
   env(t, 'SITE_MAGPIE_ARGON_UNTIL', 'invalid');
   assert.throws(() => siteMagpieConfig(), /Invalid/);
 });
@@ -50,7 +50,7 @@ test('Magpie retains quotas and rejects official, Pro and foreign endpoints', t 
   const g = createAiSpendGuard({ file: path.join(dir, 'limits.sqlite'), limits: { globalConcurrent: 1 } });
   t.after(() => g.close());
   const body = { model: config.model, messages: [], max_tokens: 100 };
-  for (const model of ['deepseek/deepseek-flash', 'deepseek-v4-pro', 'group/auto-deepseek-v4-pro']) {
+  for (const model of ['unapproved/model', 'deepseek-v4-pro', 'group/auto-deepseek-v4-pro']) {
     assert.throws(() => g.reserve({ ...config, model }, { ...body, model }, 1000), e => e.code === 'AI_MODEL_FORBIDDEN');
   }
   assert.throws(() => g.reserve({ ...config, baseUrl: 'https://api.deepseek.com/v1' }, body, 1000), e => e.code === 'AI_ENDPOINT_FORBIDDEN');
@@ -69,10 +69,10 @@ test('real request path uses Magpie and disables thinking only for Flash', async
     assert.equal(options.headers.Authorization, 'Bearer site-test-key');
     return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: '测试成功' } }], usage: { prompt_tokens: 5, completion_tokens: 5 } }));
   });
-  for (const [deadline, model] of [['2999-01-01T00:00:00Z', ARGON], ['', FLASH]]) {
+  for (const [deadline, model] of [['2999-01-01T00:00:00Z', ARGON], ['', 'opencode-go/deepseek-v4.1-flash']]) {
     env(t, 'SITE_MAGPIE_ARGON_UNTIL', deadline);
     await ai.__test.postChatCompletion(ai.getConfig(), { messages: [{ role: 'user', content: '测试' }], max_tokens: 100 });
     assert.equal(sent.model, model);
-    assert.deepEqual(sent.thinking, model === FLASH ? { type: 'disabled' } : undefined);
+    assert.deepEqual(sent.thinking, model !== ARGON ? { type: 'disabled' } : undefined);
   }
 });
