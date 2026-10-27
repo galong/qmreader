@@ -36,11 +36,18 @@
   const star = $('#reader-star');
   const immersive = $('#reader-immersive');
   if (star) actions.appendChild(star);
-  const aiBtn = make('button', 'ghost-btn wb-ai', `${icon('sparkles')}<span class="button-label">AI 伴读</span>`);
+  const aiBtn = make('button', 'ghost-btn wb-ai', `${icon('bot-message-square')}<span class="button-label">AI 伴读</span>`);
   aiBtn.type = 'button';
   aiBtn.id = 'wb-ai-toggle';
   aiBtn.setAttribute('aria-label', 'AI 伴读');
   aiBtn.setAttribute('aria-pressed', 'false');
+  const tocBtn = make('button', 'ghost-btn wb-toc-btn hidden', icon('table-of-contents'));
+  tocBtn.type = 'button';
+  tocBtn.id = 'wb-toc-toggle';
+  tocBtn.setAttribute('aria-label', '文章目录');
+  tocBtn.setAttribute('aria-expanded', 'false');
+  tocBtn.setAttribute('aria-controls', 'reader-toc');
+  actions.appendChild(tocBtn);
   actions.appendChild(aiBtn);
   if (immersive) actions.appendChild(immersive);
 
@@ -84,6 +91,49 @@
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !menu.classList.contains('hidden')) { setMenu(false); moreBtn.focus(); }
   });
+
+  /* ---------- table of contents: a popover on the bar, not a row in the page ---------- */
+  const toc = $('#reader-toc');
+  if (toc) {
+    bar.appendChild(toc);
+    toc.open = false;
+    toc.querySelector('summary')?.setAttribute('hidden', '');
+  }
+  const setToc = open => {
+    if (!toc) return;
+    toc.open = open;
+    tocBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    tocBtn.setAttribute('aria-pressed', open ? 'true' : 'false');
+  };
+  tocBtn.addEventListener('click', event => {
+    event.stopPropagation();
+    setToc(!toc.open);
+  });
+  toc?.addEventListener('click', event => {
+    if (event.target.closest('a')) setToc(false);
+  });
+  document.addEventListener('click', event => {
+    if (toc?.open && !event.target.closest('#reader-toc, #wb-toc-toggle')) setToc(false);
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && toc?.open) { setToc(false); tocBtn.focus(); }
+  });
+  const syncToc = () => {
+    const available = Boolean(toc) && !toc.classList.contains('hidden');
+    tocBtn.classList.toggle('hidden', !available);
+    if (!available && toc?.open) setToc(false);
+  };
+
+  /* ---------- theme toggle: a moon in light mode, a sun in dark mode ---------- */
+  const themeBtn = $('#theme-toggle');
+  const syncTheme = () => {
+    if (!themeBtn || typeof setElementIcon !== 'function') return;
+    const dark = document.body.dataset.theme === 'dark';
+    setElementIcon(themeBtn, dark ? 'sun' : 'moon');
+    const label = dark ? '切换到日间模式' : '切换到夜间模式';
+    themeBtn.setAttribute('aria-label', label);
+    themeBtn.title = label;
+  };
 
   /* ---------- mode switch: drives the existing tab handlers ---------- */
   const modeButtons = $$('[data-wb-mode]', bar);
@@ -148,6 +198,7 @@
   const syncProgress = () => {
     progressQueued = false;
     const max = pane.scrollHeight - pane.clientHeight;
+    bar.classList.toggle('wb-scrolled', pane.scrollTop > 160);
     bar.style.setProperty('--wb-progress', max > 0 ? Math.min(1, Math.max(0, pane.scrollTop / max)).toFixed(4) : '0');
   };
   pane?.addEventListener('scroll', () => {
@@ -155,6 +206,20 @@
     progressQueued = true;
     requestAnimationFrame(syncProgress);
   }, { passive: true });
+
+  /* ---------- list meta: what you are looking at and how many ---------- */
+  const scopeBar = $('#list-scope-bar');
+  const listMeta = make('div', 'wb-list-meta');
+  listMeta.innerHTML = '<b></b><span></span>';
+  scopeBar?.insertAdjacentElement('afterend', listMeta);
+  const syncListMeta = () => {
+    const title = ($('#list-title')?.textContent || '').trim();
+    const cards = $$('#entry-list .entry-card');
+    const unread = cards.filter(card => !card.classList.contains('read')).length;
+    $('b', listMeta).textContent = title;
+    $('span', listMeta).textContent = cards.length ? `${cards.length} 篇${unread ? ` · ${unread} 未读` : ''}` : '';
+    listMeta.classList.toggle('hidden', !title || !!$('#ps-entry-view:not(.hidden)'));
+  };
 
   /* ---------- crumb: keeps the source in view while scrolling ---------- */
   const crumb = $('.wb-crumb', bar);
@@ -181,6 +246,9 @@
       syncNext();
       syncCrumb();
       syncProgress();
+      syncToc();
+      syncTheme();
+      syncListMeta();
     });
   };
   const observer = new MutationObserver(syncAll);
@@ -191,8 +259,11 @@
     ['#reader-source', { childList: true, subtree: true, characterData: true }],
     ['#reader-title', { childList: true, subtree: true, characterData: true }],
     ['.reader-tab[data-tab="rewrite"]', { childList: true, characterData: true, subtree: true }],
-    ['#entry-list', { childList: true }],
+    ['#entry-list', { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] }],
+    ['#list-title', { childList: true, characterData: true, subtree: true }],
+    ['#reader-toc', { attributes: true, attributeFilter: ['class'] }],
   ].forEach(([sel, opts]) => { const node = $(sel); if (node) observer.observe(node, opts); });
   observer.observe(app, { attributes: true, attributeFilter: ['class'] });
+  observer.observe(document.body, { attributes: true, attributeFilter: ['data-theme'] });
   syncAll();
 })();

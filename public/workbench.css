@@ -485,3 +485,59 @@ body[data-theme="light"] #app > #reader-pane { background: var(--surface); }
 #app #reader .reader-toc:not(.hidden) { margin: 0 0 14px; padding: 0; border: 0; background: transparent; }
 #app #reader .reader-toc > summary { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 0; color: var(--text-2); font-size: 12.5px; cursor: pointer; }
 #app #reader .reader-toc > summary:hover { color: var(--text-0); }
+
+/* ================= round 3: calmer list header, TOC popover, crumb on scroll ================= */
+/* the home sub-tabs duplicate what the sidebar and the list header already say */
+#app #entry-pane-tabs,
+#app #asset-activity-strip { display: none; }
+#app .wb-list-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px 14px 2px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+  color: var(--text-2);
+}
+#app .wb-list-meta b { color: var(--text-0); font-size: 13px; font-weight: 600; }
+#app .wb-list-meta.hidden { display: none; }
+
+/* the bar's source crumb only appears once the header has scrolled away */
+#app .wb-crumb { opacity: 0; transition: opacity 0.15s ease; }
+#app .wb-bar.wb-scrolled .wb-crumb { opacity: 1; }
+
+/* table of contents */
+#app .wb-toc-btn.hidden { display: none; }
+#app .wb-bar > #reader-toc { position: absolute; top: calc(100% + 6px); right: var(--wb-pad, 56px); z-index: 12; margin: 0; }
+#app .wb-bar > #reader-toc:not([open]) > nav { display: none; }
+#app .wb-bar > #reader-toc > nav {
+  display: flex;
+  flex-direction: column;
+  width: min(280px, 86vw);
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+}
+#app .wb-bar > #reader-toc.hidden { display: none; }
+#app .wb-bar > #reader-toc .reader-toc-link {
+  display: block;
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: var(--text-1);
+  font-size: 13px;
+  line-height: 1.4;
+  text-decoration: none;
+}
+#app .wb-bar > #reader-toc .reader-toc-link:hover { background: rgba(17, 17, 17, 0.05); color: var(--text-0); }
+[data-theme="dark"] #app .wb-bar > #reader-toc .reader-toc-link:hover { background: rgba(255, 255, 255, 0.07); }
+#app .wb-bar > #reader-toc .reader-toc-h3 { padding-left: 22px; color: var(--text-2); }
+#app .wb-bar > #reader-toc .reader-toc-h4 { padding-left: 34px; color: var(--text-2); }
+#app .wb-actions > .wb-toc-btn[aria-pressed="true"] { background: rgba(17, 17, 17, 0.07); }
+@media (max-width: 760px) { #app .wb-bar > #reader-toc { right: 8px; } }
+#app .wb-bar > #reader-toc > summary { display: none; }

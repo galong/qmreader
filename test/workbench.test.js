@@ -36,3 +36,10 @@ test('reader mode switch drives the existing tab handlers instead of duplicating
   assert.match(js, /#reader-rail-translate/);
   assert.match(js, /setAgentCollapsed/);
 });
+
+test('icons used by the workbench exist in the generated lucide subset', () => {
+  const icons = read('lucide-icons.js');
+  for (const name of ['sun', 'moon', 'table-of-contents', 'bot-message-square', 'ellipsis']) {
+    assert.ok(icons.includes(`"${name}":`), `${name} missing from lucide-icons.js`);
+  }
+});
