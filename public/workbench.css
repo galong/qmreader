@@ -632,3 +632,17 @@ body[data-theme="light"] #app > #reader-pane { background: var(--surface); }
   border: 0; border-radius: 7px; background: transparent; color: var(--text-1);
 }
 #app .wb-prefs-wrap > #reader-prefs-toggle:hover { background: var(--bg-2); }
+
+@media (max-width: 760px) {
+  #app .wb-bar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 48px;
+    padding: 6px 12px;
+    gap: 4px;
+  }
+  #app .wb-bar .wb-ai { display: none; }
+  #app .wb-modes { flex: 0 0 auto; }
+  #app .wb-modes button { padding: 0 7px; white-space: nowrap; }
+  #app .wb-actions { flex: 0 0 auto; margin-left: auto; }
+}
