@@ -3750,8 +3750,8 @@ function renderAuthState() {
   if (authOpen && !loggedIn) {
     authOpen.disabled = false;
     authOpen.innerHTML = restoring
-      ? '<span class="account-avatar">Q</span><span class="account-text"><strong>登录 / 注册</strong><span>正在同步账户 · 可直接阅读</span></span>'
-      : '<span class="account-avatar" id="guest-avatar">Q</span><span class="account-text"><strong>登录 / 注册</strong><span>无需登录即可阅读</span></span>';
+      ? '<span class="account-avatar">Q</span><span class="account-text"><strong>登录</strong><span>无需登录，可直接阅读</span></span>'
+      : '<span class="account-avatar" id="guest-avatar">Q</span><span class="account-text"><strong>登录</strong><span>收藏和进度会跟着你走</span></span>';
   }
   if (!loggedIn && !restoring) {
     setAccountMenuOpen(false);
@@ -4137,12 +4137,12 @@ function renderList() {
       : state.view === 'hot'
       ? '还没有足够反馈<br/>提交链接、点赞或收藏后会逐步形成热门列表'
       : state.q
-      ? `没有找到与“${escapeHtml(state.q)}”相关的文章<br/>换个关键词，或清空搜索框`
+      ? `没有找到“${escapeHtml(state.q)}”<br/>也许它还没被写出来。换个关键词试试`
       : state.view === 'starred'
-      ? '还没有收藏<br/>读到好文章时点「收藏」，它会出现在这里'
+      ? '还没有收藏<br/>好文章值得被留下，读到时按 S'
       : state.view === 'unread'
-      ? '全部读完了<br/>去「热门」看看大家在读什么'
-      : '这里还没有文章<br/>换一个频道看看，或稍后再来';
+      ? 'Inbox Zero，达成<br/>全部读完了。去窗外看看远处吧'
+      : '这里还安静着<br/>换一个频道看看，或稍后再来';
     el.innerHTML = `<div class="list-empty">${text}</div>`;
     return;
   }
@@ -4228,13 +4228,19 @@ function renderList() {
     };
     frag.appendChild(card);
   }
+  if (visibleList.length === list.length && !state.entryListHasMore && list.length > 5 && !state.q) {
+    const end = document.createElement('div');
+    end.className = 'qm-list-end';
+    end.innerHTML = '<span>到底了</span><small>互联网读不完，眼睛要休息。</small>';
+    frag.appendChild(end);
+  }
   if (visibleList.length < list.length) {
     const more = document.createElement('button');
     const remaining = list.length - visibleList.length;
     more.type = 'button';
     more.className = 'list-load-more';
-    more.textContent = `继续显示 · 还有 ${remaining} 条`;
-    more.setAttribute('aria-label', `继续显示文章，还有 ${remaining} 条`);
+    more.textContent = `显示更多 · 还有 ${remaining} 篇`;
+    more.setAttribute('aria-label', `显示更多文章，还有 ${remaining} 篇`);
     more.onclick = () => {
       const scrollTop = el.scrollTop;
       const nextId = list[visibleList.length] && list[visibleList.length].id;
@@ -5376,19 +5382,47 @@ function renderAgentContextStrip() {
     return;
   }
   const chars = elementTextForCopy(readerLanguageRoot(state.readerTab)).length;
-  el.textContent = chars ? `基于本文（${formatCompactCount(chars)} 字）回答` : '基于本文回答';
+  el.textContent = chars ? `本文 ${formatCompactCount(chars)} 字` : '基于本文';
+  el.title = '回答基于当前正文';
 }
 
+// Lines about reading and asking. One per article, so a re-render never reshuffles it.
+const AGENT_EMPTY_QUOTES = [
+  ['学而不思则罔，思而不学则殆。', '《论语》'],
+  ['尽信书，则不如无书。', '《孟子》'],
+  ['博学之，审问之，慎思之，明辨之。', '《中庸》'],
+  ['读书无疑者，须教有疑。', '朱熹'],
+  ['旧书不厌百回读，熟读深思子自知。', '苏轼'],
+  ['好读书，不求甚解。', '陶渊明（我们会帮你求一点）'],
+  ['不动笔墨不读书。', '徐特立'],
+  ['书犹药也，善读之可以医愚。', '刘向'],
+];
+const AGENT_EMPTY_INK = `
+  <svg class="qm-ink" viewBox="0 0 120 80" aria-hidden="true" focusable="false">
+    <path d="M14 26c15-6 30-5 46 3 16-8 31-9 46-3v40c-15-6-30-5-46 3-16-8-31-9-46-3z"/>
+    <path d="M60 29v40"/>
+    <path d="M22 35c10-3 20-3 31 1M22 43c10-3 20-3 31 1M22 51c7-2 14-2 21 0"/>
+    <path class="qm-ink-mark" d="M67 36c10-4 20-4 31-1"/>
+    <path d="M67 44c10-4 20-4 31-1M67 52c7-2 14-2 20-1"/>
+    <path class="qm-ink-note" d="M92 6h16a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4h-9l-5 5v-5h-2a4 4 0 0 1-4-4v-8a4 4 0 0 1 4-4z"/>
+    <path class="qm-ink-note" d="M98 14h8"/>
+  </svg>`;
+
 function agentEmptyHtml(kind = 'empty') {
-  const hasArticle = Boolean(state.activeEntry);
-  const title = !hasArticle ? '先选择一篇文章' : kind === 'busy' ? '正在组织回答' : '读到哪里，问到哪里';
+  const entry = state.activeEntry;
+  const hasArticle = Boolean(entry);
+  const title = !hasArticle ? '先选一篇文章' : kind === 'busy' ? '正在组织回答…' : '读到哪里，问到哪里';
   const note = !hasArticle
-    ? '点开文章后，我会读完全文再回答。'
-    : '选中正文里的一段可以单独问。关键事实请回原文核对。';
+    ? '点开文章后，我会先读完全文，再回答。'
+    : '选中正文里的一段，可以单独问。关键事实，请回原文核对。';
+  const seed = [...String(entry?.id || '')].reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+  const [line, by] = hasArticle ? AGENT_EMPTY_QUOTES[seed % AGENT_EMPTY_QUOTES.length] : ['开卷有益。', '宋太宗'];
   return `
-    <div class="agent-empty agent-empty-state">
+    <div class="agent-empty agent-empty-state qm-empty">
+      ${AGENT_EMPTY_INK}
       <strong>${escapeHtml(title)}</strong>
       <p>${escapeHtml(note)}</p>
+      ${kind === 'busy' ? '' : `<figure class="qm-quote"><blockquote>${escapeHtml(line)}</blockquote><figcaption>${escapeHtml(by)}</figcaption></figure>`}
     </div>`;
 }
 
@@ -8288,10 +8322,10 @@ function updateAgentControls() {
   const send = $('#agent-send');
   const panel = $('#agent-side-panel');
   if (!input || !send) return;
-  if (!hasEntry) input.placeholder = '问当前文章…';
-  else if (!hasUser) input.placeholder = '登录后围绕当前文章对话';
-  else if (!hasKey) input.placeholder = '填写 API Key 后提问';
-  else input.placeholder = '问当前文章…';
+  if (!hasEntry) input.placeholder = '问问这篇文章…';
+  else if (!hasUser) input.placeholder = '登录后，就能问这篇文章';
+  else if (!hasKey) input.placeholder = '在设置里填好 API Key，就能提问';
+  else input.placeholder = '问问这篇文章…';
   input.disabled = !hasEntry || !hasUser || !hasKey || state.agentBusy;
   send.disabled = state.agentBusy ? false : (!hasEntry || !hasUser || !hasKey || !input.value.trim());
   setElementIcon(send, state.agentBusy ? 'square' : 'send', { className: 'app-icon' });
@@ -10034,9 +10068,9 @@ async function deleteCurrentEntry() {
   if (!entry || !isAdmin()) return;
   const title = entry.titleZh || entry.title || '这篇文章';
   const ok = await showConfirmDialog({
-    title: '删除页面',
-    message: `确认删除《${title}》？这会从前台列表、文章页、公开资产目录中隐藏该页面；已沉淀的翻译、点评、划线和对话数据不会被清空。`,
-    confirmText: '删除页面',
+    title: '删除文章',
+    message: `删除《${title}》？文章会从列表和文章页隐藏，已有的中文稿、划线和对话都会保留。`,
+    confirmText: '删除',
     danger: true,
   });
   if (!ok) return;
@@ -10064,11 +10098,11 @@ async function deleteCurrentEntry() {
     renderSidebar();
     toast('页面已删除');
   } catch (err) {
-    toast('删除失败: ' + err.message, 5000);
+    toast('删除失败：' + err.message, 5000);
   } finally {
     if (btn) {
       btn.disabled = false;
-      setButtonIconLabel(btn, 'trash-2', '删除页面');
+      setButtonIconLabel(btn, 'trash-2', '删除文章');
     }
     renderAdminEntryControls();
   }
@@ -10767,13 +10801,13 @@ function moveVisibleEntry(delta, { notifyEdge = false } = {}) {
   }
   const nextIndex = idx < 0 ? fallback : idx + delta;
   if (nextIndex < 0 || nextIndex >= list.length) {
-    if (notifyEdge) toast(delta > 0 ? '已是当前列表最后一篇' : '已是当前列表第一篇');
+    if (notifyEdge) toast(delta > 0 ? '已是最后一篇。今天的阅读量，超过了全国 99% 的用户' : '已是第一篇，再往前就是昨天了');
     pulseReaderNavEdge(delta);
     return;
   }
   const next = list[nextIndex];
   if (!next || next.id === state.activeEntry?.id) {
-    if (notifyEdge) toast(delta > 0 ? '已是当前列表最后一篇' : '已是当前列表第一篇');
+    if (notifyEdge) toast(delta > 0 ? '已是最后一篇。今天的阅读量，超过了全国 99% 的用户' : '已是第一篇，再往前就是昨天了');
     pulseReaderNavEdge(delta);
     return;
   }

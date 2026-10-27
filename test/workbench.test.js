@@ -34,7 +34,8 @@ test('AI companion starts closed and the old persisted preference is ignored', (
 test('reader mode switch drives the existing tab handlers instead of duplicating them', () => {
   assert.match(js, /\.reader-tab\[data-tab="original"\]/);
   assert.match(js, /#reader-rail-translate/);
-  assert.match(js, /setAgentCollapsed/);
+  // Reopening the AI panel goes through the existing #agent-open handler.
+  assert.match(js, /#agent-open/);
 });
 
 test('icons used by the workbench exist in the generated lucide subset', () => {
