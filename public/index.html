@@ -41,7 +41,7 @@
     }, { once: true });
   </script>
   <link rel="stylesheet" href="/web-collection.css?v=1.0.0">
-  <link rel="stylesheet" href="/workbench.css?v=20261028-aiset1">
+  <link rel="stylesheet" href="/workbench.css?v=20261028-ink2">
   <link rel="stylesheet" href="/ai-settings.css?v=20261028-aiset1">
 </head>
 <body data-theme="light">
@@ -106,8 +106,8 @@
         <button id="auth-open" class="account-card" type="button" disabled aria-busy="true">
           <span class="account-avatar" id="guest-avatar">Q</span>
           <span class="account-text">
-            <strong>登录 / 注册</strong>
-            <span>无需登录即可阅读</span>
+            <strong>登录</strong>
+            <span>收藏和进度会跟着你走</span>
           </span>
         </button>
         <button id="account-info" class="account-card account-info hidden" type="button"></button>
@@ -204,9 +204,16 @@
         <p class="ps-credit">源文稿来自播客原文服务。</p>
       </div>
       <div id="reader-empty" class="reader-empty">
-        <div class="empty-logo">Q</div>
-        <p class="reader-empty-title">选择一篇文章开始阅读</p>
-        <p class="reader-empty-hint">在左侧选来源，再从中间列表点开任意一篇，正文会在这里排成书页。</p>
+        <svg class="qm-ink qm-ink-cup" viewBox="0 0 120 84" aria-hidden="true" focusable="false">
+          <path class="qm-steam" d="M50 30c-5-5 5-9 0-15"/>
+          <path class="qm-steam qm-steam-2" d="M60 28c-5-5 5-9 0-15"/>
+          <path class="qm-steam qm-steam-3" d="M70 30c-5-5 5-9 0-15"/>
+          <path d="M38 38h44v10a22 22 0 0 1-44 0z"/>
+          <path d="M82 42c10 0 10 13 0 13"/>
+          <path d="M26 74h68"/>
+        </svg>
+        <p class="reader-empty-title" id="qm-greeting">选一篇，慢慢读</p>
+        <p class="reader-empty-hint">从左侧挑一篇，正文会在这里排成书页。</p>
         <ul class="reader-empty-keys" aria-label="键盘快捷键">
           <li><span><kbd>J</kbd><kbd>K</kbd></span>下一篇 / 上一篇</li>
           <li><span><kbd>S</kbd></span>收藏</li>
@@ -259,7 +266,7 @@
           <div class="reader-toolbar">
             <div class="reader-toolbar-main">
               <button id="reader-star" class="reader-action-pill" type="button" aria-label="收藏这篇文章" title="收藏（S）"></button>
-              <a id="reader-open-original" class="ghost-btn reader-toolbar-icon reader-open-original hidden" target="_blank" rel="noopener" title="在新标签页打开原网页" aria-label="打开原网页"><span data-qm-icon="external-link"></span><span class="button-label">原网页</span></a>
+              <a id="reader-open-original" class="ghost-btn reader-toolbar-icon reader-open-original hidden" target="_blank" rel="noopener" title="打开原网页" aria-label="打开原网页"><span data-qm-icon="external-link"></span><span class="button-label">原网页</span></a>
               <button id="reader-prefs-toggle" class="ghost-btn reader-prefs-toggle reader-toolbar-icon" type="button" title="阅读设置：背景、字体、字号、行距、版心" aria-label="阅读设置" aria-expanded="false"><span class="reader-aa" aria-hidden="true">Aa</span><span class="button-label">阅读设置</span></button>
               <div class="reader-more">
                 <button id="reader-more-toggle" class="ghost-btn reader-toolbar-icon" type="button" title="更多" aria-label="更多操作" aria-haspopup="menu" aria-expanded="false"><span data-qm-icon="ellipsis"></span></button>
@@ -271,7 +278,7 @@
               </div>
             </div>
             <div class="reader-toolbar-admin">
-              <button id="reader-delete" class="ghost-btn danger reader-delete reader-toolbar-icon hidden" type="button" title="删除页面" aria-label="删除页面"><span data-qm-icon="trash-2"></span><span class="button-label">删除页面</span></button>
+              <button id="reader-delete" class="ghost-btn danger reader-delete reader-toolbar-icon hidden" type="button" title="删除文章" aria-label="删除文章"><span data-qm-icon="trash-2"></span><span class="button-label">删除文章</span></button>
             </div>
           </div>
           <div id="reader-preferences" class="reader-preferences hidden" role="dialog" aria-label="阅读设置">
@@ -837,9 +844,9 @@
   <script defer src="/provider-icons.js?v=1"></script>
   <script defer src="/ai-providers.js?v=20261028-aiset1"></script>
   <script defer src="/ai-settings.js?v=20261028-aiset1"></script>
-  <script defer src="/app.js?v=20261028-aiset1"></script>
+  <script defer src="/app.js?v=20261028-ink2"></script>
   <script defer src="/podscribe.js?v=6"></script>
   <script defer src="/web-collection.js?v=1.0.0"></script>
-  <script defer src="/workbench.js?v=20261027-chat2"></script>
+  <script defer src="/workbench.js?v=20261028-ink2"></script>
 </body>
 </html>

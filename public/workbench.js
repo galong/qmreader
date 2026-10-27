@@ -24,28 +24,26 @@
   bar.innerHTML = `
     <div class="wb-crumb" aria-hidden="true"></div>
     <div class="wb-modes" role="group" aria-label="阅读版本">
+      <button type="button" data-wb-mode="zh" aria-pressed="false">中文</button>
       <button type="button" data-wb-mode="original" aria-pressed="true">原文</button>
-      <button type="button" data-wb-mode="translation" aria-pressed="false">译文</button>
-      <button type="button" data-wb-mode="rewrite" aria-pressed="false">改写</button>
     </div>
     <div class="wb-actions"></div>`;
-  reader.insertBefore(bar, reader.firstChild);
+  // The bar spans the whole reading pane so its rule meets the panes on both sides.
+  const readerPane = $('#reader-pane');
+  (readerPane || reader).insertBefore(bar, (readerPane || reader).firstChild);
   const actions = $('.wb-actions', bar);
 
-  // Primary actions: star (moved), focus (moved), AI companion (new).
-  // Move the existing action so permission, loading and click handling stay intact.
+  // Quiet bar: star, original page, reading settings, more. Everything else is in the menu.
+  // Nodes are moved, so permission, loading and click handling stay intact.
   const rewriteAction = $('#reader-rewrite');
-  const rewriteActionSlot = make('div', 'wb-rewrite-slot hidden');
-  if (rewriteAction) rewriteActionSlot.appendChild(rewriteAction);
-  actions.appendChild(rewriteActionSlot);
   const star = $('#reader-star');
   const immersive = $('#reader-immersive');
+  const openOriginal = $('#reader-open-original');
   if (star) actions.appendChild(star);
-  const aiBtn = make('button', 'ghost-btn wb-ai', `${icon('bot-message-square')}<span class="button-label">AI 伴读</span>`);
-  aiBtn.type = 'button';
-  aiBtn.id = 'wb-ai-toggle';
-  aiBtn.setAttribute('aria-label', 'AI 伴读');
-  aiBtn.setAttribute('aria-pressed', 'false');
+  if (openOriginal) {
+    openOriginal.classList.add('wb-icon-only');
+    actions.appendChild(openOriginal);
+  }
   const tocBtn = make('button', 'ghost-btn wb-toc-btn hidden', icon('table-of-contents'));
   tocBtn.type = 'button';
   tocBtn.id = 'wb-toc-toggle';
@@ -53,29 +51,16 @@
   tocBtn.setAttribute('aria-expanded', 'false');
   tocBtn.setAttribute('aria-controls', 'reader-toc');
   actions.appendChild(tocBtn);
-  actions.appendChild(aiBtn);
-  // Copy and font settings are used often enough to sit on the bar, icon only.
   const copyBtn = $('#reader-copy-link');
   const prefsBtn = $('#reader-prefs-toggle');
-  if (copyBtn) {
-    copyBtn.classList.add('ghost-btn', 'wb-icon-only');
-    copyBtn.removeAttribute('role');
-    copyBtn.setAttribute('aria-label', '复制全文');
-    actions.appendChild(copyBtn);
-  }
   const prefsWrap = make('div', 'wb-prefs-wrap');
   if (prefsBtn) {
     prefsBtn.classList.add('wb-icon-only');
-    prefsBtn.innerHTML = '<span class="wb-aa" aria-hidden="true">Aa</span><span class="button-label">字体</span>';
+    prefsBtn.title = '阅读设置';
+    prefsBtn.innerHTML = '<span class="wb-aa" aria-hidden="true">Aa</span><span class="button-label">阅读设置</span>';
     prefsWrap.appendChild(prefsBtn);
   }
   actions.appendChild(prefsWrap);
-  if (immersive) {
-    immersive.classList.add('ghost-btn');
-    immersive.removeAttribute('role');
-    immersive.setAttribute('aria-label', '沉浸阅读');
-    actions.appendChild(immersive);
-  }
 
   // Secondary actions live in one menu; the nodes are moved, not copied.
   const moreWrap = make('div', 'wb-more');
@@ -88,10 +73,39 @@
   const menu = make('div', 'wb-menu hidden');
   menu.setAttribute('role', 'menu');
   menu.id = 'wb-more-menu';
-  ['#reader-open-original', '#reader-like', '#reader-delete'].forEach(sel => {
-    const node = $(sel);
-    if (node) menu.appendChild(node);
+  const menuItem = (id, iconName, label) => {
+    const node = make('button', 'wb-menu-item', `${icon(iconName)}<span class="button-label">${label}</span>`);
+    node.type = 'button';
+    node.id = id;
+    node.setAttribute('role', 'menuitem');
+    return node;
+  };
+  // Direct translation, for articles that also have a rewrite.
+  const translationItem = menuItem('wb-menu-translation', 'languages', '查看直译');
+  translationItem.addEventListener('click', () => {
+    if (currentMode() === 'translation') drive.rewrite(); else drive.translation();
   });
+  menu.appendChild(translationItem);
+  [copyBtn, immersive].forEach(node => {
+    if (!node) return;
+    node.classList.remove('ghost-btn', 'wb-icon-only');
+    node.setAttribute('role', 'menuitem');
+    menu.appendChild(node);
+  });
+  // Admin tools sit below a rule. Regenerating proxies the original button,
+  // which stays in the rewrite panel so app.js keeps owning its state.
+  const adminSep = make('div', 'wb-menu-sep');
+  adminSep.setAttribute('role', 'separator');
+  const regenItem = menuItem('wb-menu-regen', 'refresh-cw', '重新生成中文');
+  regenItem.addEventListener('click', () => rewriteAction?.click());
+  menu.append(adminSep, regenItem);
+  const deleteBtn = $('#reader-delete');
+  if (deleteBtn) {
+    deleteBtn.classList.remove('wb-icon-only');
+    menu.appendChild(deleteBtn);
+  }
+  const like = $('#reader-like');
+  if (like) like.classList.add('hidden');
   moreBtn.setAttribute('aria-controls', menu.id);
   moreWrap.append(moreBtn, menu);
   actions.appendChild(moreWrap);
@@ -105,7 +119,9 @@
   };
   moreBtn.addEventListener('click', event => {
     event.stopPropagation();
-    setMenu(menu.classList.contains('hidden'));
+    const open = menu.classList.contains('hidden');
+    if (open && typeof setReaderPrefsOpen === 'function') setReaderPrefsOpen(false);
+    setMenu(open);
   });
   menu.addEventListener('click', event => {
     if (event.target.closest('#reader-prefs-toggle')) { setMenu(false); return; }
@@ -165,10 +181,16 @@
 
   /* ---------- mode switch: drives the existing tab handlers ---------- */
   const modeButtons = $$('[data-wb-mode]', bar);
+  const modesGroup = $('.wb-modes', bar);
+  const rewriteStatus = () => (typeof entryRewriteStatus === 'function' ? entryRewriteStatus(state.activeEntry) : 'missing');
+  const hasTranslation = () => Boolean(state.translation)
+    || (typeof assetCountForType === 'function' && assetCountForType(state.activeEntry, 'translation') > 0);
   const drive = {
     original: () => $('.reader-tab[data-tab="original"]')?.click(),
     rewrite: () => $('.reader-tab[data-tab="rewrite"]')?.click(),
     translation: () => $('#reader-rail-translate')?.click(),
+    // "中文" means the rewrite; the direct translation only stands in when the rewrite failed.
+    zh: () => (rewriteStatus() === 'failed' && hasTranslation() ? drive.translation() : drive.rewrite()),
   };
   modeButtons.forEach(btn => btn.addEventListener('click', () => drive[btn.dataset.wbMode]?.()));
 
@@ -179,31 +201,74 @@
   };
   const syncModes = () => {
     const mode = currentMode();
-    rewriteActionSlot.classList.toggle('hidden', mode !== 'rewrite' || !rewriteAction || rewriteAction.classList.contains('hidden'));
-    modeButtons.forEach(btn => btn.setAttribute('aria-pressed', btn.dataset.wbMode === mode ? 'true' : 'false'));
-    const label = $('.reader-tab[data-tab="rewrite"]')?.textContent?.trim();
-    const rewriteBtn = modeButtons.find(btn => btn.dataset.wbMode === 'rewrite');
-    if (rewriteBtn && label && rewriteBtn.textContent !== label) rewriteBtn.textContent = label;
+    const pressed = mode === 'original' ? 'original' : 'zh';
+    modeButtons.forEach(btn => btn.setAttribute('aria-pressed', btn.dataset.wbMode === pressed ? 'true' : 'false'));
+    // Chinese articles have nothing to switch to.
+    modesGroup?.classList.toggle('hidden', rewriteStatus() === 'native');
+    const rewriteReady = rewriteStatus() === 'ready';
+    translationItem.classList.toggle('hidden', !(hasTranslation() && rewriteReady && mode !== 'original'));
+    $('.button-label', translationItem).textContent = mode === 'translation' ? '回到中文改写' : '查看直译';
+    const canRegen = Boolean(rewriteAction) && !rewriteAction.classList.contains('hidden') && rewriteStatus() !== 'native';
+    regenItem.classList.toggle('hidden', !canRegen);
+    $('.button-label', regenItem).textContent = state.rewrite?.body ? '重新生成中文' : '生成中文';
+    regenItem.disabled = Boolean(rewriteAction?.disabled);
+    const deleteVisible = deleteBtn && !deleteBtn.classList.contains('hidden');
+    adminSep.classList.toggle('hidden', !canRegen && !deleteVisible);
   };
 
-  /* ---------- AI companion toggle ---------- */
+  /* ---------- pane toggles live on the bars, not floating over the page ---------- */
+  // Collapse-left sits at the end of the list header; once the list is gone it
+  // moves to the start of the reader bar. Reopen-AI mirrors it on the right.
+  const leftToggle = $('#left-collapse-toggle');
+  const listActions = $('#entry-pane > .pane-header .pane-actions');
+  const aiOpenBtn = make('button', 'ghost-btn wb-icon-only wb-ai-open hidden', icon('panel-right-open'));
+  aiOpenBtn.type = 'button';
+  aiOpenBtn.id = 'wb-ai-open';
+  aiOpenBtn.title = '打开 AI 对话';
+  aiOpenBtn.setAttribute('aria-label', '打开 AI 对话');
+  aiOpenBtn.addEventListener('click', () => $('#agent-open')?.click());
+  actions.appendChild(aiOpenBtn);
   const syncAi = () => {
-    const open = !app.classList.contains('agent-collapsed');
-    aiBtn.setAttribute('aria-pressed', open ? 'true' : 'false');
-    app.dataset.wbAi = open ? '1' : '0';
+    const collapsed = app.classList.contains('agent-collapsed');
+    app.dataset.wbAi = collapsed ? '0' : '1';
+    aiOpenBtn.classList.toggle('hidden', !collapsed);
+    if (!leftToggle) return;
+    const listShown = $('#entry-pane')?.offsetWidth > 0;
+    const home = listShown ? listActions : bar;
+    if (home && leftToggle.parentElement !== home) home === bar ? bar.insertBefore(leftToggle, bar.firstChild) : home.appendChild(leftToggle);
   };
-  aiBtn.addEventListener('click', () => {
-    const open = !app.classList.contains('agent-collapsed');
-    if (open && typeof setAgentCollapsed === 'function') setAgentCollapsed(true);
-    else if (typeof setContextPanel === 'function') setContextPanel('agent', { expand: true });
-    syncAi();
-  });
+
+  /* ---------- greeting on the empty reader, by hour ---------- */
+  const greeting = $('#qm-greeting');
+  if (greeting) {
+    const h = new Date().getHours();
+    greeting.textContent = h >= 2 && h < 5 ? '凌晨还在读 RSS 的，都是狠人'
+      : h < 2 || h >= 23 ? '夜深了，读完这一篇就睡吧'
+      : h < 11 ? '早。先读一篇，再开始今天'
+      : h < 14 ? '午间，读一篇短的'
+      : h < 18 ? '下午好，泡杯茶，慢慢读'
+      : '晚上好，今天值得读的都在这里';
+  }
+
+  /* ---------- end mark: a quiet 完 and the reading time ---------- */
+  const fin = make('div', 'qm-fin hidden', '<span class="qm-fin-mark">完</span><small></small>');
+  fin.setAttribute('aria-hidden', 'true');
+  const syncFin = () => {
+    const panel = ['#reader-rewrite-panel', '#reader-translation', '#reader-original-panel']
+      .map(sel => $(sel)).find(node => node && !node.classList.contains('hidden'));
+    const text = (panel?.textContent || '').replace(/\s+/g, '');
+    fin.classList.toggle('hidden', text.length < 200);
+    if (text.length < 200) return;
+    const cjk = (text.match(CJK_RE) || []).length;
+    const minutes = Math.max(1, Math.round(cjk / 400 + (text.length - cjk) / 1200));
+    $('small', fin).textContent = `约 ${minutes} 分钟读完${minutes >= 15 ? '，辛苦了' : ''}`;
+  };
 
   /* ---------- next-article card ---------- */
   const next = make('button', 'wb-next hidden');
   next.type = 'button';
   next.innerHTML = '<span class="wb-next-text"><small></small><b></b></span><kbd>J</kbd>';
-  reader.appendChild(next);
+  reader.append(fin, next);
   next.addEventListener('click', () => {
     if (typeof moveVisibleEntry === 'function') moveVisibleEntry(1, { notifyEdge: true });
   });
@@ -283,6 +348,7 @@
       syncModes();
       syncAi();
       syncNext();
+      syncFin();
       syncCrumb();
       syncProgress();
       syncToc();
@@ -328,12 +394,52 @@
   });
   tagAll();
 
+  // Content arrives after the panels switch; recount the end mark when it does.
+  const finObserver = new MutationObserver(() => requestAnimationFrame(syncFin));
+  ['#reader-content', '#rewrite-content', '#translation-list'].forEach(sel => {
+    const root = $(sel);
+    if (root) finObserver.observe(root, { childList: true });
+  });
+
+  /* ---------- small things for people who look closely ---------- */
+  const say = msg => (typeof toast === 'function' ? toast(msg, 3200) : null);
+  // ↑↑↓↓←→←→BA
+  const konami = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'];
+  let konamiAt = 0;
+  document.addEventListener('keydown', event => {
+    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    konamiAt = key === konami[konamiAt] ? konamiAt + 1 : key === konami[0] ? 1 : 0;
+    if (konamiAt === konami.length) {
+      konamiAt = 0;
+      say('已解锁：30 条命。可惜文章还是得一篇一篇读');
+    }
+  });
+  // Five quick clicks on the logo.
+  const logo = $('#brand-home .brand-logo');
+  let logoClicks = [];
+  logo?.addEventListener('click', () => {
+    const now = Date.now();
+    logoClicks = logoClicks.filter(t => now - t < 1500).concat(now);
+    if (logoClicks.length >= 5) {
+      logoClicks = [];
+      logo.classList.remove('qm-spin');
+      void logo.offsetWidth;
+      logo.classList.add('qm-spin');
+      say('Q 是乔木的 Q，也是 Question 的 Q');
+    }
+  });
+  try {
+    console.log('%cQMReader%c\n你打开了控制台。这里没有广告，只有 J K S A I 五个快捷键。\n读长文的人，大概也爱读源码。',
+      'font: 600 20px Georgia, serif; letter-spacing: .02em;', 'font: 12px/1.8 system-ui; color: #888;');
+  } catch { /* console may be absent */ }
+
   const observer = new MutationObserver(syncAll);
   [
     ['#reader-original-panel', { attributes: true, attributeFilter: ['class'] }],
     ['#reader-translation', { attributes: true, attributeFilter: ['class'] }],
     ['#reader-rewrite-panel', { attributes: true, attributeFilter: ['class'] }],
-    ['#reader-rewrite', { attributes: true, attributeFilter: ['class'] }],
+    ['#reader-rewrite', { attributes: true, attributeFilter: ['class', 'disabled'] }],
+    ['#reader-delete', { attributes: true, attributeFilter: ['class'] }],
     ['#reader-source', { childList: true, subtree: true, characterData: true }],
     ['#reader-title', { childList: true, subtree: true, characterData: true }],
     ['.reader-tab[data-tab="rewrite"]', { childList: true, characterData: true, subtree: true }],

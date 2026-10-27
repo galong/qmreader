@@ -1092,3 +1092,514 @@ html { scrollbar-width: thin; scrollbar-color: var(--wb-thumb) transparent; }
 }
 .agent-model-pop[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) { .agent-model-pop { animation: none; } }
+
+/* ==========================================================================
+   Quiet toolbar + AI panel + component rules (2026-10-27, plan A)
+   One icon button, one segmented control, one menu. The accent fill is kept
+   for send/login/submit; nothing in the reader chrome is solid black.
+   ========================================================================== */
+
+/* Segmented control: same as the list scope bar (grey track, white pill). */
+#app .wb-modes {
+  gap: 2px;
+  padding: 3px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--bg-2);
+}
+#app .wb-modes.hidden { display: none; }
+#app .wb-modes button {
+  height: 26px;
+  min-width: 52px;
+  padding: 0 12px;
+  border-radius: 6px;
+  color: var(--text-1);
+  font-size: 13px;
+}
+#app .wb-modes button:hover { color: var(--text-0); }
+#app .wb-modes button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text-0);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+}
+[data-theme="dark"] #app .wb-modes button[aria-pressed="true"] { background: var(--bg-3, rgba(255, 255, 255, 0.12)); }
+
+/* Icon button: 32px, transparent, grey on hover, one colour for all. */
+#app .wb-actions { gap: 2px; }
+#app .wb-actions > :is(.ghost-btn, .reader-action-pill, a),
+#app .wb-actions .wb-prefs-wrap > #reader-prefs-toggle,
+#app .wb-actions .wb-more-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: auto;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-1);
+  text-decoration: none;
+}
+#app .wb-actions > :is(.ghost-btn, .reader-action-pill, a):hover,
+#app .wb-actions .wb-prefs-wrap > #reader-prefs-toggle:hover,
+#app .wb-actions .wb-prefs-wrap > #reader-prefs-toggle[aria-expanded="true"],
+#app .wb-actions .wb-more-btn:hover,
+#app .wb-actions .wb-more-btn[aria-expanded="true"] {
+  background: var(--bg-2);
+  color: var(--text-0);
+}
+#app .wb-actions > :is(.ghost-btn, .reader-action-pill, a) .app-icon,
+#app .wb-actions .wb-more-btn .app-icon { width: 17px; height: 17px; }
+#app .wb-actions > .hidden { display: none; }
+#app .wb-actions > .wb-icon-only,
+#app .wb-actions .wb-prefs-wrap > #reader-prefs-toggle,
+#app .wb-actions .wb-more-btn { width: 32px; padding: 0; }
+#app .wb-actions .wb-aa { font-size: 14px; font-weight: 600; }
+
+/* Star: no count, a filled star once saved. */
+#app .wb-actions > #reader-star { width: 32px; padding: 0; }
+#app .wb-actions > #reader-star .reader-action-count,
+#app .wb-actions > #reader-star .reader-action-label { display: none; }
+#app .wb-actions > #reader-star:is(.active, [aria-pressed="true"]) { background: transparent; color: #c98a12; }
+#app .wb-actions > #reader-star:is(.active, [aria-pressed="true"]):hover { background: var(--bg-2); }
+
+/* Pane toggles (collapse list, reopen AI): the same icon button, centred on the bar. */
+#app #left-collapse-toggle,
+#app #context-open-rail #agent-open {
+  top: 10px;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-1);
+  backdrop-filter: none;
+}
+#app #context-open-rail { top: 10px; }
+#app #context-open-rail #agent-open { top: 0; }
+#app #left-collapse-toggle:hover,
+#app #context-open-rail #agent-open:hover { background: var(--bg-2); color: var(--text-0); }
+#app #left-collapse-toggle .app-icon,
+#app #context-open-rail #agent-open .app-icon { width: 17px; height: 17px; }
+
+/* Menu: one style for every item, admin tools below a rule. */
+#app .wb-menu { min-width: 176px; padding: 4px; border-radius: 10px; }
+#app .wb-menu > :is(button, a) { gap: 10px; height: 32px; padding: 0 10px; border-radius: 6px; font-size: 13px; color: var(--text-1); }
+#app .wb-menu > :is(button, a):hover { background: var(--bg-2); color: var(--text-0); }
+#app .wb-menu > :is(button, a):disabled { opacity: 0.5; cursor: default; }
+#app .wb-menu > :is(button, a) .app-icon { width: 16px; height: 16px; color: var(--text-2); flex: none; }
+#app .wb-menu > :is(button, a) .button-label { display: inline; }
+#app .wb-menu > .wb-menu-sep { height: 1px; min-height: 0; margin: 4px 6px; padding: 0; background: var(--border-subtle); border-radius: 0; pointer-events: none; }
+#app .wb-menu > .wb-menu-sep.hidden,
+#app .wb-menu > .hidden { display: none; }
+#app .wb-menu > #reader-delete,
+#app .wb-menu > #reader-delete .app-icon { color: var(--semantic-red, #c4392f); }
+#app .wb-menu > #reader-immersive[aria-pressed="true"] { color: var(--text-0); }
+
+/* Generate buttons inside panels are secondary, not solid black. */
+#app #reader .reader-section-actions .ghost-btn.primary,
+#app #reader #reader-bilingual,
+#app #reader #reader-rewrite {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-0);
+  font-size: 13px;
+  font-weight: 500;
+  filter: none;
+}
+#app #reader .reader-section-actions .ghost-btn.primary:hover,
+#app #reader #reader-bilingual:hover,
+#app #reader #reader-rewrite:hover { background: var(--bg-2); }
+
+/* ---- AI panel ---- */
+#app #agent-pane .context-tabs { gap: 2px; padding: 0 8px 0 16px; height: 52px; }
+#app #agent-pane #context-tab-agent { flex: 1; }
+#app #agent-pane .context-tabs > .icon-btn { width: 32px; height: 32px; border-radius: 8px; color: var(--text-1); }
+#app #agent-pane .context-tabs > .icon-btn:hover { background: var(--bg-2); color: var(--text-0); }
+
+
+/* ==========================================================================
+   Left columns (2026-10-27), after Folo / Readwise Reader.
+   Two surfaces only: a grey nav, white list and reader. Every header row is
+   52px with one hairline. One left edge per column: nav at 18px, list at 16px.
+   Selection is an inset rounded tint, never a full-bleed block.
+   ========================================================================== */
+
+/* ---- nav ---- */
+#app #sidebar { border-right: 1px solid var(--border-subtle); }
+#app #sidebar .brand {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 52px;
+  padding: 0 8px 0 18px;
+}
+#app #sidebar .brand .brand-home { flex: 1 1 auto; min-width: 0; justify-content: flex-start; gap: 8px; padding: 0; }
+#app #sidebar .brand .brand-logo { width: 22px; height: 22px; border-radius: 6px; font-size: 12px; }
+#app #sidebar .brand .brand-name { font-size: 14px; font-weight: 650; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; }
+#app #sidebar .brand .icon-btn,
+#app #sidebar #submit-link-open {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-1);
+}
+#app #sidebar .brand .icon-btn:hover,
+#app #sidebar #submit-link-open:hover { background: rgba(17, 17, 17, 0.06); color: var(--text-0); }
+[data-theme="dark"] #app #sidebar .brand .icon-btn:hover,
+[data-theme="dark"] #app #sidebar #submit-link-open:hover { background: rgba(255, 255, 255, 0.08); }
+#app #sidebar #sidebar-toggle { display: none; }
+
+#app #sidebar .views { padding: 4px 8px 4px; gap: 1px; }
+#app #sidebar .view-btn,
+#app #sidebar .feed-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  margin: 0;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text-1);
+  font-size: 13.5px;
+  line-height: 1.3;
+}
+#app #sidebar .feed-item { height: 30px; }
+#app #sidebar .view-btn:is([data-view="unread"], [data-view="hot"], [data-view="contributors"], [data-view="history"]) { display: none; }
+#app #sidebar .view-btn .view-ico,
+#app #sidebar .view-btn .app-icon { width: 16px; height: 16px; flex: none; color: var(--text-2); }
+#app #sidebar .feed-item img,
+#app #sidebar .feed-item .favicon,
+#app #sidebar .feed-item .letter-icon { width: 16px; height: 16px; min-width: 16px; border-radius: 4px; flex: none; }
+#app #sidebar .view-btn:hover,
+#app #sidebar .feed-item:hover { background: rgba(17, 17, 17, 0.045); color: var(--text-0); }
+#app #sidebar .view-btn.active,
+#app #sidebar .feed-item.active { background: rgba(17, 17, 17, 0.07); color: var(--text-0); font-weight: 600; }
+#app #sidebar .view-btn.active .app-icon { color: var(--text-0); }
+[data-theme="dark"] #app #sidebar .view-btn:hover,
+[data-theme="dark"] #app #sidebar .feed-item:hover { background: rgba(255, 255, 255, 0.06); }
+[data-theme="dark"] #app #sidebar .view-btn.active,
+[data-theme="dark"] #app #sidebar .feed-item.active { background: rgba(255, 255, 255, 0.1); }
+#app #sidebar .view-btn .count,
+#app #sidebar .feed-item .fcount {
+  margin-left: auto;
+  padding: 0;
+  background: none;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+#app #sidebar .feed-item .fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+#app #sidebar #feed-groups { padding: 0 8px 12px; }
+#app #sidebar .group-label {
+  padding: 18px 10px 6px;
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+#app #sidebar .account-strip { padding: 8px; border-top: 1px solid var(--border-subtle); background: transparent; }
+#app #sidebar .account-strip .account-card { padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; box-shadow: none; }
+#app #sidebar .account-strip .account-card:hover { background: rgba(17, 17, 17, 0.045); }
+[data-theme="dark"] #app #sidebar .account-strip .account-card:hover { background: rgba(255, 255, 255, 0.06); }
+
+/* ---- list ---- */
+#app #entry-pane { background: var(--surface); }
+#app #entry-pane > .pane-header {
+  display: flex;
+  align-items: center;
+  height: 52px;
+  min-height: 52px;
+  padding: 0 8px 0 16px;
+  border: 0;
+  background: var(--surface);
+}
+#app #entry-pane > .pane-header .pane-actions { display: flex; align-items: center; justify-content: flex-start; gap: 4px; flex: 1; min-width: 0; }
+#app #entry-pane #search {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background-color: var(--bg-2);
+  font-size: 13px;
+}
+#app #entry-pane #search:focus { box-shadow: 0 0 0 1px var(--border-strong); }
+#app #entry-pane #mark-read-btn { display: none; }
+#app #list-scope-bar { margin: 2px 16px 0; }
+#app .wb-list-meta { margin: 0; padding: 14px 16px 6px; border: 0; }
+#app .wb-list-meta span { color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+#app #entry-pane .entry-list { padding: 0 8px 16px; }
+#app #entry-pane .entry-card {
+  position: relative;
+  gap: 12px;
+  margin: 0 0 2px;
+  padding: 12px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+}
+#app #entry-pane .entry-card:hover { background: rgba(17, 17, 17, 0.035); }
+#app #entry-pane .entry-card.active,
+#app #entry-pane .entry-card.active:hover { background: var(--bg-2); }
+[data-theme="dark"] #app #entry-pane .entry-card:hover { background: rgba(255, 255, 255, 0.04); }
+#app #entry-pane .entry-card::before,
+#app #entry-pane .entry-card::after { display: none; }
+
+/* Unread: bold title plus a small dot at the end of the source row, clear of the edge. */
+#app #entry-pane .entry-card .unread-dot {
+  position: absolute;
+  top: 19px;
+  right: 12px;
+  left: auto;
+  width: 6px;
+  height: 6px;
+  margin: 0;
+  border-radius: 50%;
+  background: var(--signal, #e5484d);
+}
+#app #entry-pane .entry-card.read .unread-dot { display: none; }
+#app #entry-pane .entry-kicker { gap: 6px; min-width: 0; padding-right: 14px; }
+#app #entry-pane .entry-source-line { gap: 6px; min-width: 0; }
+#app #entry-pane .entry-source-line .favicon,
+#app #entry-pane .entry-source-line img,
+#app #entry-pane .entry-source-line .letter-icon { width: 14px; height: 14px; min-width: 14px; border-radius: 4px; }
+#app #entry-pane .entry-card .entry-title { margin-top: 6px; font-size: 14.5px; line-height: 1.45; letter-spacing: 0; }
+#app #entry-pane .entry-card:not(.read) .entry-title { color: var(--text-0); font-weight: 600; }
+#app #entry-pane .entry-card.read .entry-title { color: var(--text-1); font-weight: 400; }
+#app #entry-pane .entry-card .entry-summary { margin-top: 4px; }
+#app #entry-pane .entry-media { width: 56px; height: 56px; margin-top: 24px; border-radius: 8px; overflow: hidden; }
+#app #entry-pane .entry-media .entry-thumb { width: 100%; height: 100%; object-fit: cover; border-radius: 0; }
+
+/* The resizer is the hairline between list and reader, not a white strip. */
+#app #list-resizer { background: var(--surface); box-shadow: inset 1px 0 0 var(--border-subtle); }
+#app #list-resizer:hover,
+#app.is-list-resizing #list-resizer { box-shadow: inset 2px 0 0 var(--border-strong); }
+
+/* ---- pane toggles docked on the bars ---- */
+#app #left-collapse-toggle {
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-1);
+  backdrop-filter: none;
+  transform: none;
+}
+#app #left-collapse-toggle:hover { background: var(--bg-2); color: var(--text-0); }
+#app #left-collapse-toggle .app-icon { width: 17px; height: 17px; }
+#app:not(.reading) #left-collapse-toggle { display: none; }
+/* The rail lives outside #app; on desktop the reader bar carries this button. */
+@media (min-width: 861px) {
+  #context-open-rail { display: none !important; }
+}
+
+/* ---- reader bar spans the whole pane ---- */
+#app #reader-pane > .wb-bar { margin: 0; padding: 0 12px 0 16px; }
+#app.left-collapsed #reader-pane > .wb-bar { padding-left: 8px; }
+#app #reader-pane > .wb-bar > #left-collapse-toggle { order: 0; margin-right: 4px; }
+#app #reader-pane:has(> #reader.hidden) > .wb-bar { display: none; }
+#app #reader-pane > .wb-bar > #reader-toc { right: 12px; }
+#app #reader-pane > #reader { padding-top: 8px; }
+
+/* ==========================================================================
+   Ink & small delights (2026-10-27)
+   Line drawings in the text colour, one highlighter stroke in the accent,
+   serif for anything quoted. Motion is slow and stops for reduced motion.
+   ========================================================================== */
+#app { --qm-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", Georgia, serif; }
+
+#app .qm-ink {
+  display: block;
+  width: 112px;
+  height: auto;
+  margin: 0 auto 18px;
+  fill: none;
+  stroke: var(--text-2);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.85;
+}
+#app .qm-ink .qm-ink-mark { stroke: var(--signal, #e5484d); stroke-width: 5; opacity: 0.28; }
+#app .qm-ink .qm-ink-note { stroke: var(--text-1); }
+
+/* AI empty state */
+#app #agent-pane .qm-empty { display: flex; flex-direction: column; align-items: center; gap: 0; padding: 0 20px; text-align: center; }
+#app #agent-pane .qm-empty strong { color: var(--text-0); font-size: 15px; font-weight: 600; letter-spacing: 0.02em; }
+#app #agent-pane .qm-empty p { max-width: 17em; margin: 8px 0 0; color: var(--text-2); font-size: 12.5px; line-height: 1.75; text-wrap: balance; }
+#app .qm-quote { margin: 22px 0 0; padding: 0; text-align: center; }
+#app .qm-quote::before { content: ""; display: block; width: 20px; height: 1px; margin: 0 auto 14px; background: var(--border-strong, var(--border)); }
+#app .qm-quote blockquote {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-1);
+  font-family: var(--qm-serif);
+  font-size: 14px;
+  line-height: 1.8;
+  letter-spacing: 0.04em;
+}
+#app .qm-quote figcaption { margin-top: 4px; color: var(--text-2); font-size: 11.5px; letter-spacing: 0.04em; }
+#app .qm-quote figcaption::before { content: "—— "; }
+#app #agent-pane .qm-empty .qm-ink { animation: qm-rise 0.5s ease both; }
+
+/* Empty reader */
+#app #reader-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+#app #reader-empty .empty-logo { display: none; }
+#app #reader-empty .qm-ink-cup { width: 120px; margin-bottom: 22px; }
+#app #reader-empty .reader-empty-title {
+  margin: 0;
+  color: var(--text-0);
+  font-family: var(--qm-serif);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+#app #reader-empty .reader-empty-hint { text-wrap: balance; margin: 10px 0 0; color: var(--text-2); font-size: 13px; letter-spacing: 0.02em; }
+#app #reader-empty .reader-empty-keys {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 10px 28px;
+  margin: 32px 0 0;
+  padding: 18px 0 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: none;
+  box-shadow: none;
+  color: var(--text-2);
+  font-size: 12.5px;
+  text-align: left;
+}
+#app #reader-empty .reader-empty-keys li { display: flex; align-items: center; gap: 10px; }
+#app #reader-empty .reader-empty-keys li > span { display: inline-flex; gap: 3px; min-width: 44px; }
+#app #reader-empty kbd {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text-1);
+  font: 500 11px/17px ui-monospace, "SF Mono", Menlo, monospace;
+  text-align: center;
+}
+#app #reader-empty .qm-steam { animation: qm-steam 3.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center bottom; }
+#app #reader-empty .qm-steam-2 { animation-delay: 0.6s; }
+#app #reader-empty .qm-steam-3 { animation-delay: 1.2s; }
+
+/* End of an article */
+#app .qm-fin { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 48px 0 8px; color: var(--text-2); }
+#app .qm-fin.hidden { display: none; }
+#app .qm-fin-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--text-1);
+  font-family: var(--qm-serif);
+  font-size: 15px;
+  letter-spacing: 0.2em;
+  text-indent: 0.2em;
+}
+#app .qm-fin-mark::before,
+#app .qm-fin-mark::after { content: ""; width: 28px; height: 1px; background: var(--border-strong, var(--border)); }
+#app .qm-fin small { font-size: 12px; letter-spacing: 0.02em; }
+#app .qm-fin + .wb-next { margin-top: 28px; }
+
+/* List: empty and end */
+#app #entry-pane .list-empty {
+  padding: 56px 24px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.9;
+  text-align: center;
+}
+#app #entry-pane .list-empty::first-line { color: var(--text-0); font-family: var(--qm-serif); font-size: 15px; font-weight: 600; letter-spacing: 0.04em; }
+#app .qm-list-end { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 28px 0 36px; color: var(--text-2); }
+#app .qm-list-end span { display: inline-flex; align-items: center; gap: 10px; font-family: var(--qm-serif); font-size: 13px; letter-spacing: 0.2em; }
+#app .qm-list-end span::before,
+#app .qm-list-end span::after { content: ""; width: 18px; height: 1px; background: var(--border); }
+#app .qm-list-end small { font-size: 11.5px; opacity: 0.8; }
+#app #entry-pane .list-load-more {
+  display: block;
+  width: calc(100% - 16px);
+  height: 34px;
+  margin: 8px auto 20px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+#app #entry-pane .list-load-more:hover { background: var(--bg-2); color: var(--text-0); }
+
+/* Logo easter egg */
+#app .brand-logo.qm-spin { animation: qm-spin 0.9s cubic-bezier(.5, -0.3, .3, 1.3); }
+
+@keyframes qm-steam { 0%, 100% { opacity: 0.15; transform: translateY(2px); } 50% { opacity: 0.9; transform: translateY(-2px); } }
+@keyframes qm-rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 0.85; transform: none; } }
+@keyframes qm-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  #app #reader-empty .qm-steam,
+  #app #agent-pane .qm-empty .qm-ink,
+  #app .brand-logo.qm-spin { animation: none; }
+}
+
+/* Unread dot, revised: it hangs in a leading gutter beside the title's first line
+   (the Mail / Reeder / NetNewsWire convention), 12px from the edge, 6px from the text.
+   The list's text line moves to 24px so the dot has room without breaking alignment. */
+#app #entry-pane > .pane-header { padding-left: 24px; }
+#app #list-scope-bar { margin-left: 24px; }
+#app .wb-list-meta { padding-left: 24px; }
+#app #entry-pane .entry-list { padding: 0 8px 16px 6px; }
+#app #entry-pane .entry-card { padding: 12px 8px 12px 18px; }
+#app #entry-pane .entry-kicker { padding-right: 0; }
+#app #entry-pane .entry-card .unread-dot { display: none; }
+/* The title clamps (overflow: hidden), so the dot hangs off the text column instead,
+   centred on the title's first line: 18px kicker + 12px gap + half of a 21px line. */
+#app #entry-pane .entry-card .entry-main { position: relative; }
+#app #entry-pane .entry-card:not(.read) .entry-main::before {
+  content: "";
+  position: absolute;
+  top: 37.5px;
+  left: -12px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal, #2f6fed);
+}
