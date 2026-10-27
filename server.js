@@ -5,6 +5,8 @@ const { fork } = require('child_process');
 const compression = require('compression');
 const fetcher = require('./lib/fetcher');
 const deepseek = require('./lib/deepseek');
+const { createAiOAuth } = require('./lib/ai-oauth');
+const { createSecretBox } = require('./lib/secret-box');
 const { requestAiConfig } = require('./lib/request-ai-config');
 const store = require('./lib/store');
 
@@ -2976,6 +2978,66 @@ app.post('/api/me/entry-states/read', requireLogin, (req, res) => {
   } catch (e) {
     sendError(res, e, 'entry states update failed');
   }
+});
+
+const aiOAuth = createAiOAuth({ store, secretBox: createSecretBox() });
+deepseek.setOAuthResolver((accountId, userId) => aiOAuth.resolveAccess(accountId, userId));
+
+function aiOAuthOrigin(req) {
+  const configured = String(process.env.AI_OAUTH_PUBLIC_URL || '').trim();
+  if (configured) return configured;
+  return `${req.protocol}://${req.get('host')}`;
+}
+
+app.get('/api/ai/oauth/status', requireLogin, (req, res) => {
+  res.json({ ...aiOAuth.status(), accounts: aiOAuth.listAccounts(req.user.id) });
+});
+
+app.post('/api/ai/oauth/start', requireLogin, (req, res) => {
+  try {
+    res.json(aiOAuth.start(String(req.body && req.body.kind || ''), { userId: req.user.id, origin: aiOAuthOrigin(req) }));
+  } catch (e) {
+    sendError(res, e, 'sign-in start failed');
+  }
+});
+
+app.post('/api/ai/oauth/finish', requireLogin, async (req, res) => {
+  try {
+    const result = await aiOAuth.finish({
+      kind: String(req.body && req.body.kind || ''),
+      callbackUrl: String(req.body && req.body.callbackUrl || ''),
+    }, { userId: req.user.id });
+    res.json(result);
+  } catch (e) {
+    sendError(res, e, 'sign-in failed');
+  }
+});
+
+// Landing page for providers that accept an https redirect (OpenRouter, TokenDance).
+app.get('/api/ai/oauth/callback', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const page = (message, resultId = '') => res.type('html').send(`<!doctype html><meta charset="utf-8"><title>AI 授权</title>
+<body style="font:15px system-ui;padding:32px;color:#222"><p>${escapeHtml(message)}</p>
+<script>try{if(window.opener){window.opener.postMessage({type:'qm-ai-oauth',resultId:${JSON.stringify(resultId)}},location.origin)}}catch(e){}${resultId ? 'setTimeout(function(){window.close()},600)' : ''}</script></body>`);
+  if (!req.user) return page('请先在 QMReader 登录后重新授权。');
+  try {
+    const result = await aiOAuth.finish({ callbackUrl: `${aiOAuthOrigin(req)}${req.originalUrl}` }, { userId: req.user.id });
+    page('授权完成，可以关闭此窗口。', aiOAuth.stash(req.user.id, result));
+  } catch (e) {
+    page(e.message || '授权失败');
+  }
+});
+
+app.post('/api/ai/oauth/claim', requireLogin, (req, res) => {
+  try {
+    res.json(aiOAuth.claim(String(req.body && req.body.resultId || ''), req.user.id));
+  } catch (e) {
+    sendError(res, e, 'claim failed');
+  }
+});
+
+app.delete('/api/ai/oauth/accounts/:id', requireLogin, (req, res) => {
+  res.json({ ok: aiOAuth.removeAccount(req.params.id, req.user.id) });
 });
 
 app.post('/api/ai/models', requireLogin, async (req, res) => {

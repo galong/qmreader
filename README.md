@@ -104,6 +104,9 @@ HOST=127.0.0.1 PORT=3000 npm start
 | `DEEPSEEK_API_KEY` | 空 | 服务端 DeepSeek API key，用于标题翻译和默认改写 |
 | `DEEPSEEK_MODEL` | `deepseek-v4-flash` | 服务端默认标题翻译和中文改写模型 |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | DeepSeek OpenAI-compatible API 地址 |
+| `AI_OAUTH_ENABLED` | 空（关闭） | 设为 `1` 开启 AI 账号登录（ChatGPT / Codex 套餐额度，OpenRouter / 词元跳动一步授权） |
+| `QMREADER_SECRET_KEY` | 空 | 至少 16 位的随机串，用于 AES-256-GCM 加密保存 ChatGPT / Codex 登录凭证；未配置时这两项登录不可用，不会明文落库 |
+| `AI_OAUTH_PUBLIC_URL` | 空 | 站点公开地址（如 `https://rss.example.com`），OpenRouter / 词元跳动授权回调用；默认取请求域名 |
 | `AI_PROVIDER` | `deepseek` | 备用服务端 provider 名称 |
 | `AI_API_KEY` | 空 | 非 DeepSeek provider 的服务端 key |
 | `AI_BASE_URL` | 空 | 非 DeepSeek provider 的 OpenAI/Anthropic-compatible base URL |
@@ -147,6 +150,7 @@ HOST=127.0.0.1 PORT=3000 npm start
 - 服务端 key 只从 `.env` / `.env.local` / 环境变量读取，不会下发到浏览器。
 - 用户在页面里配置的 AI provider/API key 保存在浏览器 localStorage，不写入 SQLite。
 - 文章对话、模型列表和连接测试会把用户 key 随请求发送到本站后端代理调用。
+- 开启 `AI_OAUTH_ENABLED=1` 后，用户可登录 ChatGPT / Codex 账号：凭证用 `QMREADER_SECRET_KEY` 加密存入 `ai_oauth_accounts` 表，只在服务端使用，浏览器只持有账号 id；请求端点由服务端固定，不接受客户端指定的 Base URL。ChatGPT / Codex 使用 OpenAI 官方 Codex CLI 的登录方式和非公开接口，随时可能失效，请自行评估使用风险。
 - Base URL 必须是公开 `https://` 地址，服务端会拒绝本机和内网地址，降低 SSRF 风险。
 - 读者投稿必须登录，且先进入隔离审核队列；提交动作不会访问目标站，管理员通过后才执行 DNS/IP、端口、路径和重定向复核并抓取。系统拒绝内网、IP 字面量、探针接口与后台面板，限制每个账号最多 3 条待审记录，并对注册、登录和投稿限流。
 - 运行数据在 `data/qmreader.sqlite` 和 `data/cache.json`，默认不提交到 Git。

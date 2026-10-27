@@ -317,6 +317,13 @@ const AI_PROVIDER_PRESETS = [
     description: 'Cloudflare 官方 Workers AI，Base URL 里的 <ACCOUNT_ID> 需替换为你的账号 ID。',
   },
 ];
+// Extra platforms, account sign-in and key detection live in /ai-providers.js.
+if (window.QMAiProviders) {
+  const known = new Set(AI_PROVIDER_PRESETS.map(preset => preset.id));
+  for (const preset of QMAiProviders.presets) if (!known.has(preset.id)) AI_PROVIDER_PRESETS.push(preset);
+  for (const preset of AI_PROVIDER_PRESETS) if (QMAiProviders.signInForExisting[preset.id]) preset.signIn = QMAiProviders.signInForExisting[preset.id];
+  AI_PROVIDER_CATEGORIES.unshift(QMAiProviders.ACCOUNT);
+}
 const AI_PROVIDER_MAP = Object.fromEntries(AI_PROVIDER_PRESETS.map(preset => [preset.id, preset]));
 const DEFAULT_AI_PRESET_ID = 'deepseek';
 
@@ -536,6 +543,7 @@ function createProfileFromPreset(presetId = DEFAULT_AI_PRESET_ID, overrides = {}
     temperature: 0.7,
     maxTokens: 2000,
     apiKey: '',
+    oauthAccountId: '',
     isDefault: false,
     createdAt: now,
     updatedAt: now,
@@ -582,6 +590,7 @@ function normalizeProfile(raw, index = 0) {
     temperature: clampTemperature(raw && raw.temperature),
     maxTokens: clampMaxTokens(raw && (raw.maxTokens || raw.max_tokens)),
     apiKey: String(raw && (raw.apiKey || raw.api_key) || '').trim(),
+    oauthAccountId: String(raw && raw.oauthAccountId || '').trim(),
     isDefault: hasDefaultFlag ? Boolean(raw.isDefault || raw.is_default) : index === 0,
     createdAt: Number(raw && raw.createdAt) || Date.now(),
     updatedAt: Number(raw && raw.updatedAt) || Date.now(),
@@ -1557,6 +1566,7 @@ function configFromProfile(profile) {
     providerName: profile.providerName || profile.name || profile.provider || 'AI',
     providerType: profile.providerType || 'openai_compatible',
     apiKey: String(profile.apiKey || '').trim(),
+    oauthAccountId: String(profile.oauthAccountId || '').trim(),
     baseUrl: normalizeBaseUrl(profile.baseUrl),
     model: String(profile.model || '').trim(),
     temperature: clampTemperature(profile.temperature),
@@ -1573,7 +1583,7 @@ function aiConfigForPurpose(purpose = '') {
 }
 
 function hasUsableAiConfig(config = currentAiConfig()) {
-  return Boolean(config.apiKey && config.baseUrl && config.model);
+  return Boolean((config.apiKey || config.oauthAccountId) && config.baseUrl && config.model);
 }
 
 function aiHeaderValue(value, fallback = '') {
@@ -1585,6 +1595,16 @@ function aiHeaderValue(value, fallback = '') {
 }
 
 function aiHeadersFromConfig(config) {
+  if (!String(config.apiKey || '').trim() && config.oauthAccountId) {
+    // Account sign-in: only the account id travels; tokens and endpoint stay on the server.
+    return {
+      'X-AI-Provider': aiHeaderValue(config.provider, 'custom'),
+      'X-AI-OAuth-Account': aiHeaderValue(config.oauthAccountId),
+      'X-AI-Model': aiHeaderValue(config.model),
+      'X-AI-Temperature': String(config.temperature ?? ''),
+      'X-AI-Max-Tokens': String(config.maxTokens ?? ''),
+    };
+  }
   if (!String(config.apiKey || '').trim()) return {};
   return {
     'X-AI-Provider': aiHeaderValue(config.provider, 'custom'),
@@ -8591,7 +8611,7 @@ function renderAiStatus() {
 function aiProfileSelectLabel(profile) {
   const model = String(profile && profile.model || '').trim();
   const name = String(profile && profile.name || profile && profile.providerName || 'AI 配置').trim();
-  const suffix = profile && profile.apiKey ? '' : ' · 未配置';
+  const suffix = profile && (profile.apiKey || profile.oauthAccountId) ? '' : ' · 未配置';
   return `${name}${model ? ` · ${model}` : ''}${suffix}`;
 }
 
@@ -8643,7 +8663,7 @@ function renderAiProfileList() {
     btn.innerHTML = `
       <span class="ai-profile-name">${escapeHtml(profile.name)}</span>
       <span class="ai-profile-meta">${escapeHtml(profile.providerName || profile.provider)} · ${escapeHtml(profile.model || '未填模型')}</span>
-      <span class="ai-profile-key">${profile.apiKey ? escapeHtml(maskApiKey(profile.apiKey)) : '未填 API Key'}${profile.isDefault ? ' · 默认' : ''}</span>`;
+      <span class="ai-profile-key">${profile.apiKey ? escapeHtml(maskApiKey(profile.apiKey)) : (profile.oauthAccountId ? '账号登录' : '未填 API Key')}${profile.isDefault ? ' · 默认' : ''}</span>`;
     btn.onclick = () => {
       state.editingAiProfileId = profile.id;
       state.activeAiProfileId = profile.id;
@@ -8662,6 +8682,10 @@ function renderAiProfileList() {
 function renderTemplateList() {
   const el = $('#ai-template-list');
   if (!el) return;
+  if (window.QMAiProviders) {
+    QMAiProviders.renderTemplates(el, { categories: AI_PROVIDER_CATEGORIES, presets: AI_PROVIDER_PRESETS, onStatus: () => QMAiProviders.loadStatus(api).then(renderTemplateList) });
+    return;
+  }
   const parts = [];
   for (const category of AI_PROVIDER_CATEGORIES) {
     const presets = AI_PROVIDER_PRESETS.filter(preset => preset.category === category);
@@ -8692,6 +8716,55 @@ function renderQuickModels(models) {
   )).join('');
 }
 
+// Bridges the form to /ai-providers.js: account sign-in panel, key detection, auto model list.
+function aiProviderHost() {
+  const rerender = () => { persistAiProfiles(); renderAiSettings(); };
+  const patchEditing = (patch) => {
+    const editing = getEditingAiProfile();
+    if (!editing) return;
+    state.aiProfiles = state.aiProfiles.map(item => (item.id === editing.id ? { ...item, ...patch, updatedAt: Date.now() } : item));
+    rerender();
+  };
+  return {
+    api,
+    profile: () => getEditingAiProfile(),
+    refreshGallery: renderTemplateList,
+    connect(accountId, label) {
+      // Persist the whole form (preset, model...) together with the account binding.
+      const editing = getEditingAiProfile();
+      if (!editing) return;
+      state.aiProfiles = state.aiProfiles.map(item => (item.id === editing.id ? { ...item, oauthAccountId: accountId } : item));
+      $('#ai-api-key').value = '';
+      if (!saveAiProfileFromForm({ silent: true })) return;
+      toast(`已登录${label ? `：${label}` : ''}`);
+      fetchAiModels({ silent: true });
+    },
+    disconnect() { patchEditing({ oauthAccountId: '' }); },
+    useKey(key, label) {
+      $('#ai-api-key').value = key;
+      $('#ai-config-note').textContent = `${label || '服务'} 授权完成，Key 已填入，点「保存」后生效。`;
+      fetchAiModels({ silent: true });
+    },
+    applyPreset(presetId, key) {
+      applyAiPreset(presetId);
+      if (key) $('#ai-api-key').value = key;
+      fetchAiModels({ silent: true });
+    },
+    autoFetchModels() {
+      const profile = readAiProfileForm();
+      if (profile.apiKey && profile.baseUrl && !/[{<]/.test(profile.baseUrl) && profile.providerType !== 'azure_openai') fetchAiModels({ silent: true });
+    },
+  };
+}
+
+function mountAiProviderUi(profile) {
+  if (!window.QMAiProviders) return;
+  const host = aiProviderHost();
+  QMAiProviders.renderSignIn(profile, AI_PROVIDER_MAP[profile.provider], host);
+  QMAiProviders.bindDetection(host, AI_PROVIDER_PRESETS);
+  QMAiProviders.renderDetectHint(host, AI_PROVIDER_PRESETS);
+}
+
 function fillAiProfileForm(profile) {
   $('#ai-profile-name').value = profile.name || '';
   $('#ai-provider-id').value = profile.provider || 'custom';
@@ -8710,8 +8783,11 @@ function fillAiProfileForm(profile) {
   keyLink.classList.toggle('hidden', !profile.apiKeyUrl);
   $('#ai-config-note').textContent = profile.apiKey
     ? `当前 API Key：${maskApiKey(profile.apiKey)}`
-    : 'API Key 只保存在当前浏览器，不写入服务器数据库。';
+    : (AI_PROVIDER_MAP[profile.provider] && AI_PROVIDER_MAP[profile.provider].signIn
+      ? ''
+      : 'API Key 只保存在当前浏览器，不写入服务器数据库。');
   renderQuickModels(quickModelsForProfile(profile));
+  mountAiProviderUi(profile);
 }
 
 function renderAiSettings() {
@@ -8865,12 +8941,13 @@ function closeAiConfigModal() {
   renderAiSettings();
 }
 
-async function fetchAiModels() {
+async function fetchAiModels(options = {}) {
+  const silent = options && options.silent === true;
   if (!requireAuth('login')) return;
   const profile = readAiProfileForm();
   const config = configFromProfile(profile);
-  if (!config.apiKey || !config.baseUrl) {
-    toast('请先填写 API Key 和 Base URL');
+  if ((!config.apiKey && !config.oauthAccountId) || !config.baseUrl) {
+    if (!silent) toast('请先填写 API Key 和 Base URL');
     return;
   }
   const btn = $('#ai-fetch-models');
@@ -8894,7 +8971,7 @@ async function fetchAiModels() {
     $('#ai-config-note').textContent = `已获取 ${models.length} 个模型，点击下方模型可填入。`;
   } catch (err) {
     $('#ai-config-note').textContent = err.message;
-    toast('获取模型失败: ' + err.message, 5000);
+    if (!silent) toast('获取模型失败: ' + err.message, 5000);
   } finally {
     btn.disabled = false;
     btn.textContent = '获取模型';
@@ -8906,7 +8983,7 @@ async function testAiConnection() {
   const profile = readAiProfileForm();
   const config = configFromProfile(profile);
   if (!hasUsableAiConfig(config)) {
-    toast('请先填写 API Key、Base URL 和模型');
+    toast(config.oauthAccountId || AI_PROVIDER_MAP[profile.provider]?.signIn === 'chatgpt' || AI_PROVIDER_MAP[profile.provider]?.signIn === 'codex' ? '请先登录账号并填写模型' : '请先填写 API Key、Base URL 和模型');
     return;
   }
   const btn = $('#ai-test');
@@ -9914,7 +9991,7 @@ $('#ai-quick-models').onclick = (e) => {
   $('#ai-model').value = btn.dataset.model || btn.textContent.trim();
 };
 $('#ai-max-tokens').oninput = (e) => { e.target.value = e.target.value.replace(/[^\d]/g, ''); };
-$('#ai-fetch-models').onclick = fetchAiModels;
+$('#ai-fetch-models').onclick = () => fetchAiModels();
 $('#ai-test').onclick = testAiConnection;
 $('.agent-prompts').onclick = (e) => {
   if (e.target.closest('[data-agent-prompt-manage]')) {
