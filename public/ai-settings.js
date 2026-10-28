@@ -621,9 +621,30 @@
       }
     }
 
+    const testStatus = el('div', 'pd-status pd-test-status');
+    testStatus.setAttribute('role', 'status');
     const error = el('div', 'pd-status is-error');
     error.setAttribute('role', 'alert');
-    dlg.body.append(error);
+    dlg.body.append(testStatus, error);
+
+    const draft = () => ({
+      id: existing ? existing.id : '',
+      name: (entry ? entry.name : nameInput.value).trim() || 'AI',
+      presetId: entry ? entry.id : 'custom',
+      providerType: preset ? preset.providerType : 'openai_compatible',
+      category: preset ? preset.category : '',
+      baseUrl: normalizeBaseUrl(urlInput.value.trim() || (preset ? preset.baseUrl : '')),
+      apiKey: isAccount ? '' : keyInput.value.trim(),
+      oauthAccountId: isAccount ? oauthAccountId : '',
+    });
+    const testBtn = button('测试连接', '', () => {
+      const provider = draft();
+      error.textContent = '';
+      if (!provider.baseUrl || /[{<]/.test(provider.baseUrl)) { error.textContent = '请先填写完整的接口地址'; return; }
+      if (isAccount ? !provider.oauthAccountId : !provider.apiKey) { error.textContent = isAccount ? '请先登录' : '请先填写 API Key'; return; }
+      const known = existing ? modelsOf(existing)[0] : null;
+      runConnectionTest(provider, (known && known.model) || (preset && preset.defaultModel) || '', testStatus, testBtn);
+    });
 
     const save = () => {
       const name = (entry ? entry.name : nameInput.value).trim();
@@ -656,8 +677,33 @@
     };
 
     if (!existing) dlg.actions.append(button('返回', 'pd-ghost', () => { if (signer) signer.cancel(); back(); }));
-    dlg.actions.append(button('取消', '', () => { if (signer) signer.cancel(); dlg.close(); }), button(existing ? '保存' : '添加服务商', 'pd-primary', save));
+    testBtn.classList.add('pd-test');
+    dlg.actions.append(testBtn, button('取消', '', () => { if (signer) signer.cancel(); dlg.close(); }), button(existing ? '保存' : '添加服务商', 'pd-primary', save));
     (entry ? keyInput : nameInput).focus();
+  }
+
+  // Sends one real chat turn through /api/ai/test, so a key that can list models but not
+  // answer (wrong model, missing vendor header, no balance) still shows up as a failure.
+  async function runConnectionTest(provider, model, statusEl, btn) {
+    statusEl.classList.remove('is-error');
+    statusEl.textContent = '正在测试…';
+    if (btn) btn.disabled = true;
+    try {
+      if (model) {
+        const config = configFromProfile({ ...copyProvider({ id: '', name: provider.name, model }, provider) });
+        const data = await api('/api/ai/test', { method: 'POST', aiConfig: config, headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        statusEl.textContent = `连接正常 · ${data.model || model} · ${Math.round(Number(data.latencyMs) || 0)} ms`;
+      } else {
+        const models = await fetchModels(provider);
+        statusEl.textContent = models.length ? `Key 有效，可用 ${models.length} 个模型` : 'Key 有效，但服务商没有返回模型列表';
+      }
+    } catch (err) {
+      const reason = err && err.message === 'missing-api-key' ? '请先填写 API Key' : (err && err.message) || '测试失败';
+      statusEl.textContent = `连接失败：${reason}`;
+      statusEl.classList.add('is-error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   // -- models
@@ -841,9 +887,17 @@
     const idInput = input('text', profile.model || '', '模型 ID');
     const error = el('div', 'pd-status is-error');
     error.setAttribute('role', 'alert');
+    const testStatus = el('div', 'pd-status pd-test-status');
+    testStatus.setAttribute('role', 'status');
     dlg.body.append(head, field('pd-mname', '显示名称', nameInput, el('div', 'pd-hint', '在界面中显示的模型名称。')),
-      field('pd-mid', '模型 ID', idInput, el('div', 'pd-hint', '服务商提供的模型标识，通常是一个不含空格的简短名称。')), error);
-    dlg.actions.append(button('取消', '', dlg.close), button('保存', 'pd-primary', () => {
+      field('pd-mid', '模型 ID', idInput, el('div', 'pd-hint', '服务商提供的模型标识，通常是一个不含空格的简短名称。')), testStatus, error);
+    const testBtn = button('测试连接', 'pd-test', () => {
+      error.textContent = '';
+      if (!provider) { error.textContent = '找不到这个模型的服务商'; return; }
+      if (!idInput.value.trim()) { error.textContent = '请先填写模型 ID'; return; }
+      runConnectionTest(provider, idInput.value.trim(), testStatus, testBtn);
+    });
+    dlg.actions.append(testBtn, button('取消', '', dlg.close), button('保存', 'pd-primary', () => {
       const name = nameInput.value.trim();
       const model = idInput.value.trim();
       if (!name || !model) { error.textContent = '请填写显示名称和模型 ID'; return; }
