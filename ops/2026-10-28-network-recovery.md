@@ -62,5 +62,6 @@ Web qmreader-1.0.8-d6985d877a98.tar.gz
 - 受控测试覆盖主路径失败、超时后备用成功、404/鉴权/限流终止、自定义源不跨域、取消与迟到响应、并发合并和渐进正文。不能据此保证所有代理节点与 TUN 配置均可用。
 - 06:09–06:10 UTC 源站目录/列表出现过 12 秒上游超时；本机也曾观察到 TLS 超时，随后不改变代理设置即可正常读文章。没有反馈用户的日志/节点/配置，无法将反馈唯一归因于未使用 Cloudflare。
 - 06:36 UTC 默认 Python urllib 探测得到 Cloudflare 1010，正常标识的诊断请求、本机 curl、VPS curl 与 DSH 同类 Node fetch 均返回 200。依据 [Cloudflare 1010 官方说明](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-1xxx-errors/error-1010/)，这是客户端标识检查；没有关闭全站防护。Node 的目录请求确实返回 Cloudflare 响应，不能将 Python 专有阻断当作应用失败，也不能承诺所有客户端标识均被接受。
+- 同一轮本机真实 readJson 的受控主路径故障测试，已按预期尝试备用域名，但备用连接出现 UND_ERR_CONNECT_TIMEOUT；独立 Node 目录请求此前返回 200。因此当前证据支持自动恢复逻辑和备用路径存在，尚不支持持续网络成功率或该用户 TUN 故障已消除的结论。
 - 部署后 api/health HTTP 200，但 feed/refresh 状态仍为 degraded；阅读请求已验证，采集积压不在本次网络恢复变更范围。
 - 若反馈用户升级后仍失败，下一步采集实际失败路径、错误码、时间、代理分流规则与 DNS/TUN 行为，以同一文章对照开关 TUN。不要让客户端默认扫描多个未知代理地址，也不要绕过鉴权或缓存删除语义。
