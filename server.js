@@ -1789,8 +1789,31 @@ function renderSitemap(req) {
   ].join('\n');
 }
 
+// Versioned assets are cached as immutable for a year, so a hand-edited ?v=
+// that is not bumped strands returning readers on old code. Derive each local
+// script/style version from its content instead (files only change on deploy).
+const assetVersions = new Map();
+function assetVersion(file) {
+  if (!assetVersions.has(file)) {
+    try {
+      assetVersions.set(file, crypto.createHash('sha256').update(fs.readFileSync(path.join(__dirname, 'public', file))).digest('hex').slice(0, 12));
+    } catch {
+      assetVersions.set(file, '');
+    }
+  }
+  return assetVersions.get(file);
+}
+
+function withContentVersions(html) {
+  return html.replace(/(src|href)="\/([a-z0-9_-]+\.(?:js|css))\?v=[^"]*"/gi, (match, attr, file) => {
+    if (file === 'purify.min.js') return match;
+    const version = assetVersion(file);
+    return version ? `${attr}="/${file}?v=${version}"` : match;
+  });
+}
+
 function renderIndex(req, entry = null) {
-  const html = fs.readFileSync(INDEX_PATH, 'utf8');
+  const html = withContentVersions(fs.readFileSync(INDEX_PATH, 'utf8'));
   const { title, tags } = socialMetaTags(req, entry);
   const umami = umamiConfigTag(req);
   // Article data is scoped to this viewer and this no-store HTML response.

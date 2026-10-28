@@ -71,6 +71,10 @@ test('real public HTTP serves first list, anonymous article and distinct minimal
   assert.ok(bootstrap.entries.every(entry => !['public-1', 'opt-in-secret'].includes(entry.id)));
   assert.equal('content' in bootstrap.entries[0], false);
   assert.ok(!response.headers.has('set-cookie'));
+  const appVersion = require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(__dirname, '../public/app.js'))).digest('hex').slice(0, 12);
+  assert.ok(html.includes(`src="/app.js?v=${appVersion}"`), 'asset versions follow file content, so edits reach cached readers');
+  assert.match(html, /href="\/styles\.css\?v=[0-9a-f]{12}"/);
+  assert.match(html, /src="\/purify\.min\.js\?v=\d/, 'DOMPurify keeps its library version');
   const bootstrapIds = async () => JSON.parse((await fetch(base + '/').then(r => r.text()))
     .match(/<script id="qm-reader-bootstrap" type="application\/json">([\s\S]*?)<\/script>/)[1]).entries.map(entry => entry.id);
   assert.ok((await bootstrapIds()).includes('public-2'), 'repeat visits reuse the cached home page');
