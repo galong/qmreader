@@ -101,7 +101,9 @@ try:
     for name in external:
         shutil.copy2(APP / 'lib/dr' / name, DR / name)
     run('systemctl', 'start', 'qmreader')
-    for attempt in range(15):
+    # Loading the feed cache blocks the event loop for 13-20s on the contended
+    # host; a 15s window rolled back a healthy release on 2026-10-28.
+    for attempt in range(90):
         try:
             with urllib.request.urlopen('http://127.0.0.1:3088/api/version', timeout=3) as response:
                 result = json.load(response)
