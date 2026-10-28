@@ -23,7 +23,7 @@ function rewriteCandidates() {
     const note = podcastTranscript.loadTranscriptNote(entry);
     if (!note) return false;
     const rewrite = store.getRewrite(entry.id);
-    return !rewrite || rewrite.contentHash !== deepseek.rewriteContentHash(entry);
+    return !deepseek.rewriteIsCurrent(rewrite, entry);
   }).sort((a, b) => Number(b.publishedTs || 0) - Number(a.publishedTs || 0));
 }
 

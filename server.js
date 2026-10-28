@@ -47,6 +47,8 @@ const STARTUP_REFRESH_DELAY_MS = parseInt(process.env.STARTUP_REFRESH_DELAY_MS |
 const SOURCE_INTERACTION_REFRESH_COOLDOWN_MS = parseInt(process.env.SOURCE_INTERACTION_REFRESH_COOLDOWN_MS || `${5 * MINUTE_MS}`, 10);
 const FRESHNESS_SWEEP_INTERVAL_MS = parseInt(process.env.FRESHNESS_SWEEP_INTERVAL_MS || `${5 * MINUTE_MS}`, 10);
 const FRESHNESS_STARTUP_DELAY_MS = parseInt(process.env.FRESHNESS_STARTUP_DELAY_MS || `${2 * MINUTE_MS}`, 10);
+const REWRITE_CATCHUP_INTERVAL_MS = parseInt(process.env.REWRITE_CATCHUP_INTERVAL_MS || `${10 * MINUTE_MS}`, 10);
+const REWRITE_CATCHUP_STARTUP_DELAY_MS = parseInt(process.env.REWRITE_CATCHUP_STARTUP_DELAY_MS || `${4 * MINUTE_MS}`, 10);
 const FRESHNESS_SWEEP_BATCH_SIZE = parseInt(process.env.FRESHNESS_SWEEP_BATCH_SIZE || '3', 10);
 const FRESHNESS_SWEEP_MAX_COST = parseInt(process.env.FRESHNESS_SWEEP_MAX_COST || '6', 10);
 const NEWS_REFRESH_INTERVAL_MS = parseInt(process.env.NEWS_REFRESH_INTERVAL_MS || `${30 * MINUTE_MS}`, 10);
@@ -2351,6 +2353,7 @@ function normalizeBackgroundJob(job = {}) {
     sourceIds,
     reason,
     fetchOnly: Boolean(job.fetchOnly),
+    catchup: Boolean(job.catchup),
     requestedAt: Date.now(),
   };
 }
@@ -2840,6 +2843,26 @@ function scheduleStartupRefresh() {
   const delay = Number.isFinite(STARTUP_REFRESH_DELAY_MS) ? Math.max(0, STARTUP_REFRESH_DELAY_MS) : 30000;
   setTimeout(() => {
     doRefreshAll();
+  }, delay);
+}
+
+function triggerRewriteCatchup() {
+  // Never queue behind a running job: the next tick finds the same backlog.
+  if (aiWorker) return { started: false, skipped: 'AI worker busy' };
+  if (!deepseek.getConfig().configured) return { started: false, skipped: 'AI not configured' };
+  return startAutoRewriteJob({ kind: 'auto-rewrite', catchup: true, reason: 'rewrite-catchup' });
+}
+
+function scheduleRewriteCatchup() {
+  if (!Number.isFinite(REWRITE_CATCHUP_INTERVAL_MS) || REWRITE_CATCHUP_INTERVAL_MS < 0) {
+    console.log('Rewrite catch-up disabled');
+    return;
+  }
+  const interval = Math.max(MINUTE_MS, REWRITE_CATCHUP_INTERVAL_MS);
+  const delay = Number.isFinite(REWRITE_CATCHUP_STARTUP_DELAY_MS) ? Math.max(0, REWRITE_CATCHUP_STARTUP_DELAY_MS) : 4 * MINUTE_MS;
+  setTimeout(() => {
+    triggerRewriteCatchup();
+    setInterval(triggerRewriteCatchup, interval);
   }, delay);
 }
 
@@ -4010,6 +4033,7 @@ const server = app.listen(PORT, HOST, () => {
   scheduleStartupRefresh();
   scheduleDailyRefresh();
   scheduleFreshnessRefresh();
+  scheduleRewriteCatchup();
 });
 
 function shutdown(signal) {
