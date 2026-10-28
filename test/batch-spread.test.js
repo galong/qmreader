@@ -15,8 +15,9 @@ test('a daily batch is spread backwards from its stamp, never into the future', 
   const spread = spreadBatchTimestamps({ id: 'producthunt' }, batch(['c', 'a', 'b']));
   const byId = Object.fromEntries(spread.map(entry => [entry.id, entry.publishedTs]));
   assert.equal(byId.a, batchTs);
-  assert.equal(byId.b, batchTs - 40 * 60 * 1000);
-  assert.equal(byId.c, batchTs - 80 * 60 * 1000);
+  const gap = Math.floor(20 * 60 * 60 * 1000 / 3);
+  assert.equal(byId.b, batchTs - gap);
+  assert.equal(byId.c, batchTs - 2 * gap);
   assert.ok(spread.every(entry => entry.publishedTs <= batchTs));
   assert.equal(spread.find(entry => entry.id === 'b').published, new Date(byId.b).toISOString());
 });
@@ -44,10 +45,31 @@ test('history script spreads stored batches and leaves content hashes alone', ()
   const stamp = now - 60 * 60 * 1000;
   store.upsertEntries(['h1', 'h2', 'h3'].map(id => ({ id, sourceId: 'producthunt', title: id, content: `<p>${id}</p>`, publishedTs: stamp, published: new Date(stamp).toISOString() })));
   const hash = store.getEntry('h2').contentHash;
-  const changes = plan({ days: 1, now });
+  const changes = plan({ days: 2, now });
   assert.deepEqual(changes.map(c => c.id).sort(), ['h2', 'h3']);
   for (const change of changes) store.setEntryPublishedTs(change.id, change.to);
-  assert.equal(store.getEntry('h2').publishedTs, stamp - 40 * 60 * 1000);
+  assert.equal(store.getEntry('h2').publishedTs, stamp - Math.floor(20 * 60 * 60 * 1000 / 3));
   assert.equal(store.getEntry('h2').contentHash, hash);
-  assert.deepEqual(plan({ days: 1, now }), [], 'running it again changes nothing');
+  assert.deepEqual(plan({ days: 2, now }), [], 'running it again changes nothing');
+});
+
+test('consecutive daily batches never overlap', () => {
+  const day = 24 * 60 * 60 * 1000;
+  const ids = Array.from({ length: 14 }, (_, i) => `d${String(i).padStart(2, '0')}`);
+  const today = spreadBatchTimestamps({ id: 'producthunt' }, batch(ids)).map(entry => entry.publishedTs);
+  const yesterday = spreadBatchTimestamps({ id: 'producthunt' }, batch(ids).map(entry => ({ ...entry, publishedTs: batchTs - day }))).map(entry => entry.publishedTs);
+  assert.ok(Math.min(...today) > Math.max(...yesterday));
+});
+
+test('the web timeline allows at most two cards from one source in a row, keeping order', () => {
+  const vm = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8');
+  const sandbox = {};
+  vm.runInNewContext(source.slice(source.indexOf('function interleaveSourceRuns'), source.indexOf('\nfunction visibleEntries')), sandbox);
+  const list = ['a', 'ph', 'ph', 'ph', 'ph', 'ph', 'b', 'c', 'ph', 'd'].map((sourceId, i) => ({ id: `${sourceId}${i}`, sourceId }));
+  const out = Array.from(sandbox.interleaveSourceRuns(list), entry => entry.id);
+  assert.deepEqual(out, ['a0', 'ph1', 'ph2', 'b6', 'ph3', 'ph4', 'c7', 'ph5', 'ph8', 'd9']);
+  assert.equal(out.length, list.length);
+  const phOrder = out.filter(id => id.startsWith('ph'));
+  assert.deepEqual(phOrder, ['ph1', 'ph2', 'ph3', 'ph4', 'ph5', 'ph8'], 'same-source order is preserved');
 });
