@@ -2271,14 +2271,16 @@ function rewriteResponse(entry, viewer = null, assetId = '') {
   if (rewrite && exactAssetId && rewrite.entryId !== entry.id) return null;
   if (!rewrite) return null;
   const contentHash = deepseek.rewriteContentHash(entry);
+  // Same currency rule as generation, so legacy v1 podcast hashes stay visible.
+  const current = deepseek.rewriteIsCurrent(rewrite, entry, contentHash);
   if (podcastTranscript.isTranscriptPodcast(entry) &&
-      (!podcastTranscript.loadReadyTranscript(entry) || rewrite.contentHash !== contentHash)) return null;
+      (!podcastTranscript.loadReadyTranscript(entry) || !current)) return null;
   if (podscribeEntry.isPodscribeEntry(entry) &&
-      (!podscribeEntry.loadReady(entry) || rewrite.contentHash !== contentHash)) return null;
+      (!podscribeEntry.loadReady(entry) || !current)) return null;
   const reaction = store.getEntryAssetReaction(entry.id, 'rewrite', viewer, exactAssetId);
   const stale = entry && entry.sourceId === 'producthunt'
     ? !/^ph-official-v2:[a-f0-9]+$/i.test(String(rewrite.contentHash || ''))
-    : Boolean(rewrite.contentHash && rewrite.contentHash !== contentHash);
+    : Boolean(rewrite.contentHash && !current);
   return {
     ...rewrite,
     ...(podcastTranscript.isTranscriptPodcast(entry) ? { body: podcastTranscript.stripAudioTimestamps(rewrite.body) } : {}),
