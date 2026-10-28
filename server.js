@@ -3404,6 +3404,8 @@ app.get('/api/entries', (req, res) => {
 });
 
 app.get('/api/sources/:id/entries', (req, res) => {
+  const compact = req.get('X-Rss-List') === 'reader-v1';
+  res.vary('X-Rss-List');
   const limit = Math.max(1, Math.min(100, Number.parseInt(req.query.limit, 10) || 40));
   const page = fetcher.getSourceEntryHistory({
     sourceId: req.params.id,
@@ -3415,7 +3417,7 @@ app.get('/api/sources/:id/entries', (req, res) => {
   if (!page) return res.status(404).json({ error: 'source not found' });
   res.json({
     ...page,
-    entries: page.entries.map(mediaListEntry),
+    entries: page.entries.map(entry => compact ? compactEntry(mediaListEntry(entry)) : mediaListEntry(entry)),
   });
 });
 

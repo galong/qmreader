@@ -47,6 +47,13 @@ test('real public HTTP serves first list, anonymous article and distinct minimal
   assert.equal(compact.entries[0].assets, undefined);
   assert.deepEqual(full.entries.map(e => e.id), minimal.entries.map(e => e.id));
   assert.deepEqual(full.entries.map(e => e.id), compact.entries.map(e => e.id));
+  const sourceFull = await fetch(base + '/api/sources/qiaomu-blog/entries?limit=2').then(r => r.json());
+  const sourceCompactResponse = await fetch(base + '/api/sources/qiaomu-blog/entries?limit=2', {headers:{'X-Rss-List':'reader-v1'}});
+  assert.match(sourceCompactResponse.headers.get('vary'), /X-Rss-List/i);
+  const sourceCompact = await sourceCompactResponse.json();
+  assert.deepEqual(sourceCompact.entries.map(e => e.id), sourceFull.entries.map(e => e.id));
+  assert.equal(sourceCompact.entries[0].content, undefined);
+  assert.equal(sourceCompact.entries[0].assets, undefined);
   assert.equal((await fetch(base + '/api/me').then(r => r.json())).user, null);
   const article = await fetch(base + '/api/entry/public-0');
   assert.equal(article.status, 200);
