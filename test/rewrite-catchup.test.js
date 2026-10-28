@@ -107,12 +107,18 @@ test('reader state reports settled skips and failures at any age, and does not p
   assert.equal(waiting.retryAfterMs, 0);
 });
 
-test('catch-up leaves reader submissions to their own quarantine pipeline', t => {
+test('catch-up rewrites a submission from its own content and never fetches its link', async t => {
   mockSources(t);
-  t.mock.method(fetcher, 'getSourcesMeta', () => [
-    { id: 'blog', enabled: true, autoRewrite: true },
-    { id: 'user-submitted', enabled: true, autoRewrite: true },
-  ]);
-  store.upsertEntries([{ ...article('submitted'), sourceId: 'user-submitted' }]);
-  assert.equal(jobs.rewriteCatchupCandidates().some(entry => entry.id === 'submitted'), false);
+  t.mock.method(fetcher, 'getSourceById', id => ({ id, enabled: true, autoRewrite: true }));
+  const fetched = [];
+  t.mock.method(fetcher, 'fetchEntryOriginal', async entry => { fetched.push(entry.id); return entry; });
+  store.upsertEntries([{ ...article('submitted'), sourceId: 'user-submitted', link: 'https://example.com/post',
+    content: `<p>${'Submitted text that the reader sent along with the link. '.repeat(4)}</p>` }]);
+  store.upsertEntrySignal('submitted', { provider: 'submitted-content', externalId: 'https://example.com/post', kind: 'submission', sourceName: '提交正文' });
+  const rewritten = [];
+  t.mock.method(deepseek, 'rewriteEntry', async entry => { rewritten.push(entry.id);
+    return { rewrite: store.saveRewrite(entry.id, { body, model: 'test', contentHash: 'x' }), cached: false }; });
+  await jobs.autoRewriteEntries([store.getEntry('submitted')], { onlyMissing: true });
+  assert.deepEqual(fetched, [], 'the submitted link is not fetched');
+  assert.deepEqual(rewritten, ['submitted'], 'the submission still gets Chinese from its own content');
 });
