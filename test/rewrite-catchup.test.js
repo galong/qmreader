@@ -106,3 +106,13 @@ test('reader state reports settled skips and failures at any age, and does not p
   assert.equal(waiting.status, 'waiting');
   assert.equal(waiting.retryAfterMs, 0);
 });
+
+test('catch-up leaves reader submissions to their own quarantine pipeline', t => {
+  mockSources(t);
+  t.mock.method(fetcher, 'getSourcesMeta', () => [
+    { id: 'blog', enabled: true, autoRewrite: true },
+    { id: 'user-submitted', enabled: true, autoRewrite: true },
+  ]);
+  store.upsertEntries([{ ...article('submitted'), sourceId: 'user-submitted' }]);
+  assert.equal(jobs.rewriteCatchupCandidates().some(entry => entry.id === 'submitted'), false);
+});
