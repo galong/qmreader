@@ -2689,8 +2689,32 @@ function visibleContributors() {
     .filter(contributor => !needle || normalizeSearchText(contributorSearchText(contributor)).includes(needle));
 }
 
+// Daily batches (Product Hunt, papers, trending) outnumber everything else
+// together, so even spread timestamps leave long single-source runs. Allow at
+// most `maxRun` in a row; extra items wait, in order, until another source
+// breaks the run. Only the web's windowed list uses this (no cursor to break).
+function interleaveSourceRuns(list, maxRun = 2) {
+  const out = [];
+  const waiting = [];
+  let runSource = '';
+  let run = 0;
+  const blocked = entry => entry.sourceId === runSource && run >= maxRun;
+  const push = entry => {
+    if (entry.sourceId === runSource) run++;
+    else { runSource = entry.sourceId; run = 1; }
+    out.push(entry);
+  };
+  for (const entry of list) {
+    if (blocked(entry)) { waiting.push(entry); continue; }
+    push(entry);
+    while (waiting.length && !blocked(waiting[0])) push(waiting.shift());
+  }
+  return out.concat(waiting);
+}
+
 function visibleEntries() {
   let list = state.entries;
+  if ((state.view === 'all' || state.view === 'unread') && !state.filterSource && !state.q) list = interleaveSourceRuns(list);
   if (state.view === 'hot') {
     list = list
       .slice()
