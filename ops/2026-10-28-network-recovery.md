@@ -1,6 +1,6 @@
 # RSS 阅读网络恢复
 
-更新时间：2026-10-28（北京时间）。用户反馈 DSH 在 TUN 模式无法加载，并明确要求同时优化 DSH、Obsidian、网页端。
+更新时间：2026-10-28 14:33（北京时间）。用户反馈 DSH 在 TUN 模式无法加载，并明确要求同时优化 DSH、Obsidian、网页端。
 
 ## 范围与验收
 
@@ -19,11 +19,47 @@
 - 最新源站 response-cache 使用数据变更戳失效，明确禁止共享 CDN 存储；此边界继续保留。
 - 生产目录没有 .git，部署前必须逐文件核对当前代码与主分支，使用已有可回滚部署流程。
 
-## 进展
+## 发布结果
 
-- 三端实现完成：DSH 完整 check 与打包/独立 profile 安装一致；Obsidian 328 Vitest 与完整 check 通过；网页 160 个测试通过。
-- 备用 DNS 已开启代理，源站证书已签发；2026-10-28 06:07 UTC 从 VPS 访问返回 server=cloudflare、cf-ray、Cache-Control=no-store、CF-Cache-Status=DYNAMIC。
-- 公开只读/私密参数/凭据/写操作矩阵符合预期；97 个生产部署文件与 24106cf 基线摘要一致。
-- Obsidian 最终候选 d1958aee9cb590708a21232336c74cbee1befeab 已推分支并提交官方预扫描，未公开版本。
-- 宿主验证进行中；观察到 06:09 UTC 源站对目录与列表产生过 12 秒上游超时，不能将此归为纯客户端路由故障。
-- 尚未发布应用代码。
+| 端 | 版本与公开发布 | 合并与部署证据 |
+| --- | --- | --- |
+| DSH | [0.9.2](https://github.com/joeseesun/qiaomu-rss-dsh/releases/tag/v0.9.2) | [PR #16](https://github.com/joeseesun/qiaomu-rss-dsh/pull/16)，main 7f2deb7ed9583675927663de74d97f70b277c52e，候选 693b41d0b137e49b21eab765046951032fd3a220 |
+| Obsidian | [0.32.10](https://github.com/joeseesun/qiaomu-ai-rss/releases/tag/0.32.10) | [PR #98](https://github.com/joeseesun/qiaomu-ai-rss/pull/98)，main ad578be，发布 tag d1958aee9cb590708a21232336c74cbee1befeab |
+| 网页 | [1.0.8](https://github.com/joeseesun/qmreader/releases/tag/v1.0.8) | [PR #48](https://github.com/joeseesun/qmreader/pull/48)，生产 DEPLOYED_COMMIT=d6985d877a9879da5562771e9bdb5f3ee1eddcc7，api/version=1.0.8 |
+
+- 三端最终 CI 通过；DSH 完整 check 通过，Obsidian 328 个 Vitest 与其余完整 check 通过，网页 160 个测试通过。
+- DSH 对正文故障不再用列表元数据伪装成空内容成功；失败保留重试入口。原文返回后，译文与改写独立读取，不再串行阻塞。
+- 备用 DNS 已开启 Cloudflare 代理，源站证书已签发；06:07 UTC 从 VPS 访问返回 server=cloudflare、cf-ray、Cache-Control=no-store、CF-Cache-Status=DYNAMIC。
+- 公开只读/私密参数/凭据/写操作矩阵符合预期。此域名与主站共用源站，仅提供网络路径备用，不代表源站故障切换。
+- 部署前 97 个文件与 24106cf 基线摘要一致；部署后 98 个文件通过校验，systemd 服务运行。回滚包位于 /opt/qiaomu-backups/qmreader-web-20261028-061435-d6985d877a98。
+
+## 真实宿主与公开下载
+
+- DSH：在官方 RC3 的独立 profile 安装最终候选并重启后，读取目录、列表、正文与改写成功。另从公开 Release 匿名下载，在全新 public-check profile 安装，9 个打包文件逐个一致，真实页面原文/改写均成功。未测试 RC2 运行时。
+- DSH 本机 desktop profile：已安装 0.9.2，9 个文件与公开包一致，收藏等 storage 保留，安装包保存到 ~/.dsh/plugin-packages。原宿主仍缓存旧开发目录，热重载报旧目录依赖缺失；退出提示当前有运行任务，已取消退出。需任务结束后重启 DSH，不能将此桌面进程声称为新版运行验收。
+- Obsidian：1.14.5 真实桌面宿主，独立库全新安装和 0.32.9→0.32.10 升级均成功阅读。设置、收藏、已读、订阅、笔记、语音进度、保存文章字段升级前后相同，正文缓存保留。
+- rockfish：安装前备份，复制发布文件时 136 个数据/缓存文件摘要未变；插件管理显示 0.32.10，单独停用/启用后恢复原选中文章并成功显示正文。原始开发工作区未提交改动保留。
+- 网页：线上列表和文章原文通过真实浏览器验证。正文列表使用紧凑响应，认证用户/私有配置/写操作保持原路径。
+- Obsidian 最终 SHA 官方预扫描 Completed、无 Error；公开包三个文件匿名下载均 HTTP 200 且与构建一致；正式 0.32.10 扫描已排队，14:32 显示 Pending，不能等同于官方目录更新完成。
+
+公开下载 SHA-256：
+
+```text
+DSH qiaomu-rss-dsh-0.9.2.tgz
+ed87e0e6714018e0cd1bec83006b2b7fc0143a9e273b035873ed8c4892307db4
+Obsidian main.js
+255df5d5dfe3451f4f2af2a0ae440ac677421ae6e131672baf0001cec5f41f63
+Obsidian manifest.json
+a21c3c660e58cb3c15952ee1c15c03957663fa26ff14c13df73d70e40da24e6f
+Obsidian styles.css
+91dc5ccf1bec8660e29b68f3a7b1228278da67de59957d8b1fd4a5c1987b17c1
+Web qmreader-1.0.8-d6985d877a98.tar.gz
+67c3d2966cb915aeeca5bae32e4b37691f60ed9b63f09494e2e32a731f063ef0
+```
+
+## 证据边界与后续
+
+- 受控测试覆盖主路径失败、超时后备用成功、404/鉴权/限流终止、自定义源不跨域、取消与迟到响应、并发合并和渐进正文。不能据此保证所有代理节点与 TUN 配置均可用。
+- 06:09–06:10 UTC 源站目录/列表出现过 12 秒上游超时；本机也曾观察到 TLS 超时，随后不改变代理设置即可正常读文章。没有反馈用户的日志/节点/配置，无法将反馈唯一归因于未使用 Cloudflare。
+- 部署后 api/health HTTP 200，但 feed/refresh 状态仍为 degraded；阅读请求已验证，采集积压不在本次网络恢复变更范围。
+- 若反馈用户升级后仍失败，下一步采集实际失败路径、错误码、时间、代理分流规则与 DNS/TUN 行为，以同一文章对照开关 TUN。不要让客户端默认扫描多个未知代理地址，也不要绕过鉴权或缓存删除语义。
