@@ -25,3 +25,12 @@
 
 - 不承诺所有历史文章都已预生成；无可靠任务证据时返回 `not_ready`，不伪装成正在生成。
 - 本次验证内容已缓存及模拟排队到正文的状态转换，没有为验收消耗线上 AI 额度。
+
+## 已发布与线上验收
+
+- [PR #50](https://github.com/joeseesun/qmreader/pull/50) 已合并，运行版本 `1.0.9`，精确提交 `db6530764e9b24d0d269e81d5497f27c3eddc46e`；主站 `/api/version` 回读一致。
+- 最终 168 个测试、8 个网络恢复用例、3 个 Python 部署/可靠性检查通过；GitHub 分支及 PR 两轮 verify 均成功，生产依赖审计 0 漏洞。
+- 部署前 99 个基线代码/独立中间件摘要无漂移；部署后 99 个运行文件校验一致。回滚备份 `/opt/qiaomu-backups/qmreader-web-20261028-070244-db6530764e9b`。既有采集健康状态仍为 degraded，未出现 stalled / updateStopped；本次不修改采集策略。
+- [v1.0.9 Release](https://github.com/joeseesun/qmreader/releases/tag/v1.0.9) 为正式公开版本。匿名下载发布包 SHA-256 与本地一致：`7bce483b681c5bb7ba3eddfa390ef429bd8073bb83c99aa5f54a9e780df33885`，包内包含新的 `lib/reading-state.js`。
+- 用户同一篇文章：主站改写 GET 返回 `ready / retryAfterMs=0 / no-store`，API v1 状态一致；精简源列表保留 `rewriteReady=true / rewriteStatus=ready`。真实浏览器已显示该篇中文正文和图片。
+- 网络边界仍保留：本机访问 Cloudflare 备用入口两次读取超时，其中一次已收到 5467 字节；VPS 对同一备用 URL 读取完整正文成功并返回 ready。不能用服务端成功代替反馈用户的 TUN 实测；本次状态修复不等于所有网络路径均已稳定。
