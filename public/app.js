@@ -504,8 +504,6 @@ function updateRewriteUiLabels(entry = state.activeEntry) {
   if (tab) tab.textContent = copy.tab;
   const section = $('#rewrite-section-label');
   if (section) section.textContent = copy.section;
-  const emptyText = $('#rewrite-empty p');
-  if (emptyText && !shouldHoldOriginal()) emptyText.textContent = copy.empty;
   const copyBtn = $('#rewrite-copy');
   if (copyBtn) {
     copyBtn.title = copy.copyTitle;
@@ -5671,6 +5669,9 @@ function handleReaderTab(tab, { preserveFocus = false, replaceUrl = true } = {})
     }
   }
   setReaderTab(next, { replaceUrl });
+  if (next === 'rewrite' && state.activeEntry && !state.rewrite?.body && !state.rewriteLoading && !state.rewriteGenerating) {
+    void loadRewrite(state.activeEntry);
+  }
 }
 
 function maybeGenerateRewriteAfterLoad() {
@@ -5806,12 +5807,17 @@ function renderAssetHelpfulButton(type, asset) {
   btn.title = active ? '取消有用标记' : '觉得这个资产有用';
 }
 
-function renderTranslation(translation, { loading = false } = {}) {
+function renderTranslation(translation, { loading = false, error = false } = {}) {
   const hasContent = Boolean(translation && Array.isArray(translation.content) && translation.content.length);
   state.translation = hasContent ? translation : null;
   renderReaderStatsUi();
   const list = $('#translation-list');
   const empty = $('#translation-empty');
+  empty.setAttribute('role', 'status');
+  empty.setAttribute('aria-live', 'polite');
+  empty.setAttribute('aria-busy', String(loading));
+  empty.classList.add('reading-asset-state');
+  empty.innerHTML = '<p></p>';
   const emptyText = empty.querySelector('p');
   const action = $('#reader-bilingual');
   const mode = $('#translation-view-toggle');
@@ -5830,16 +5836,19 @@ function renderTranslation(translation, { loading = false } = {}) {
   renderAssetHelpfulButton('translation', state.translation);
   if (loading) {
     empty.classList.remove('hidden');
-    if (emptyText) emptyText.textContent = '正在检查这篇文章的翻译缓存…';
+    if (emptyText) emptyText.innerHTML = '<span class="reading-asset-spinner" aria-hidden="true"></span>正在加载中文译文…';
     action.disabled = true;
-    action.textContent = '检查中…';
-    $('#translation-meta').textContent = '检查中';
+    action.textContent = '加载中…';
+    $('#translation-meta').textContent = '';
     renderAssetHelpfulButton('translation', null);
     return;
   }
   if (!hasContent) {
     empty.classList.remove('hidden');
-    if (emptyText) emptyText.textContent = '这篇文章还没有中文翻译。';
+    if (error) {
+      empty.innerHTML = '<p>中文译文加载失败，请稍后重试。</p><button type="button" id="translation-retry-load" class="ghost-btn">重新加载</button>';
+      $('#translation-retry-load').onclick = () => { if (state.activeEntry) void loadTranslation(state.activeEntry); };
+    } else if (emptyText) emptyText.textContent = '这篇文章暂未提供直译，可以阅读中文改写或原文。';
     action.disabled = false;
     action.textContent = '生成中文翻译';
     $('#translation-meta').textContent = '暂无';
@@ -5876,21 +5885,24 @@ function copyTranslationText() {
 }
 
 async function loadTranslation(entry) {
+  const requestId = state.translationRequestId = (state.translationRequestId || 0) + 1;
+  const current = () => state.activeEntry?.id === entry.id && state.translationRequestId === requestId;
   state.translationLoading = true;
   renderTranslation(null, { loading: true });
   try {
     const assetId = state.readerFocus === 'translation' ? state.readerAssetId : '';
     const query = assetId ? `?assetId=${encodeURIComponent(assetId)}` : '';
     const data = await api(`/api/entry/${entry.id}/translation${query}`);
-    if (state.activeEntry?.id !== entry.id) return;
+    if (!current()) return;
     renderTranslation(data.translation);
     if (data.translation && Array.isArray(data.translation.content) && data.translation.content.length) {
       updateEntryAssets(entry.id, entryAssetHelpfulPatch('translation', data.translation), { rerenderList: false });
       renderList();
     }
   } catch {
-    renderTranslation(null);
+    if (current()) renderTranslation(null, { error: true });
   } finally {
+    if (!current()) return;
     state.translationLoading = false;
     if (state.pendingTranslationGenerate && state.activeEntry?.id === entry.id && state.readerTab === 'translation' && !state.translation) {
       state.pendingTranslationGenerate = false;
@@ -5911,23 +5923,46 @@ function rewriteMetaText(rewrite) {
 function restoreRewriteEmptyCopy() {
   const empty = $('#rewrite-empty');
   if (!empty) return;
-  empty.innerHTML = `<p>${escapeHtml(rewriteUiCopy().empty)}</p>`;
+  empty.innerHTML = '';
 }
 
-function renderRewriteAvailabilityPlaceholder(entry = state.activeEntry) {
+function renderRewriteAvailabilityPlaceholder(entry = state.activeEntry, status = '') {
   const empty = $('#rewrite-empty');
   if (!empty) return false;
-  const status = entryRewriteStatus(entry);
-  if (status !== 'pending' && status !== 'failed') return false;
-  const failed = status === 'failed';
+  if (!status) {
+    const known = entryRewriteStatus(entry);
+    status = known === 'pending' ? 'queued' : known === 'failed' ? 'failed' : 'loading';
+  }
+  const copy = {
+    loading: ['正在加载中文内容…', '', true],
+    queued: ['中文内容正在排队处理…', '完成后会自动显示，也可以先阅读原文。', true],
+    processing: ['正在生成中文内容…', '完成后会自动显示，也可以先阅读原文。', true],
+    retrying: ['中文内容正在重试生成…', '完成后会自动显示，也可以先阅读原文。', true],
+    waiting: ['中文内容仍在后台处理中', '可以先阅读原文，稍后查看处理结果。', false],
+    not_ready: ['中文内容尚未就绪', '可以先阅读原文，稍后再试。', false],
+    unavailable: ['这篇文章暂未提供中文内容', '可以先阅读原文。', false],
+    failed: ['中文内容暂时无法生成', '可以先阅读原文，稍后再试。', false],
+    error: ['中文内容加载失败', '请检查网络后重试，也可以先阅读原文。', false],
+  }[status] || ['中文内容尚未就绪', '可以先阅读原文，稍后再试。', false];
+  const [label, hint, busy] = copy;
+  empty.classList.add('reading-asset-state');
+  empty.setAttribute('role', 'status');
+  empty.setAttribute('aria-live', 'polite');
+  empty.setAttribute('aria-busy', String(busy));
   empty.innerHTML = `
-    <p>${failed ? '中文改写暂不可用' : '中文处理中…'}</p>
-    <p class="rewrite-pending-hint">${failed ? '可以稍后再来看，或直接阅读英文原文。' : '改写完成后会自动显示在这里，也可以先看英文原文。'}</p>
-    <button type="button" id="rewrite-view-original" class="rewrite-view-original">查看英文原文</button>
+    <p class="reading-asset-label">${busy ? '<span class="reading-asset-spinner" aria-hidden="true"></span>' : ''}${escapeHtml(label)}</p>
+    ${hint ? `<p class="rewrite-pending-hint">${escapeHtml(hint)}</p>` : ''}
+    ${status === 'loading' ? '<div class="reader-skeleton" aria-hidden="true"><span></span><span></span><span></span><span></span></div>' : ''}
+    <div class="reading-asset-actions">
+      ${!busy ? '<button type="button" id="rewrite-retry-load" class="ghost-btn">重新加载</button>' : ''}
+      <button type="button" id="rewrite-view-original" class="rewrite-view-original">阅读原文</button>
+    </div>
   `;
   empty.classList.remove('hidden');
   const btn = $('#rewrite-view-original');
   if (btn) btn.onclick = () => { void revealOriginalForEntry(); };
+  const retry = $('#rewrite-retry-load');
+  if (retry) retry.onclick = () => { if (state.activeEntry) void loadRewrite(state.activeEntry); };
   return true;
 }
 
@@ -5953,8 +5988,10 @@ async function revealOriginalForEntry() {
   updateFetchOriginalButton(state.activeEntry || entry);
 }
 
-function renderRewrite(rewrite) {
+function renderRewrite(rewrite, { status = rewrite?.body?.trim() ? 'ready' : 'not_ready' } = {}) {
+  if (!rewrite?.body?.trim()) rewrite = null;
   state.rewrite = rewrite || null;
+  state.rewriteLoadStatus = status;
   const copyTextForEntry = rewriteUiCopy();
   updateRewriteUiLabels();
   renderReaderStatsUi();
@@ -5968,9 +6005,13 @@ function renderRewrite(rewrite) {
   copy.disabled = !rewrite || !rewrite.body;
   renderAssetHelpfulButton('rewrite', state.rewrite);
   // Readers get the Chinese version automatically; regenerating stays an admin tool.
-  if (action) action.classList.toggle('hidden', Boolean(rewrite && rewrite.body) && !isAdmin());
+  const busy = ['loading', 'queued', 'processing', 'retrying'].includes(status);
+  if (action) {
+    action.classList.toggle('hidden', busy || (Boolean(rewrite && rewrite.body) && !isAdmin()));
+    action.disabled = busy || Boolean(state.rewriteGenerating);
+  }
   if (!rewrite || !rewrite.body) {
-    empty.classList.remove('hidden');
+    renderRewriteAvailabilityPlaceholder(state.activeEntry, status);
     if (meta) {
       meta.textContent = '';
       meta.classList.add('hidden');
@@ -5983,6 +6024,7 @@ function renderRewrite(rewrite) {
     return;
   }
   empty.classList.add('hidden');
+  empty.setAttribute('aria-busy', 'false');
   const metaText = rewriteMetaText(rewrite);
   if (action) {
     action.textContent = rewrite.stale ? copyTextForEntry.stale : copyTextForEntry.redo;
@@ -6005,26 +6047,40 @@ function copyRewriteText() {
   copyText(state.rewrite && state.rewrite.body, rewriteUiCopy().copied);
 }
 
-async function loadRewrite(entry) {
+async function loadRewrite(entry, { poll = false, startedAt = Date.now() } = {}) {
+  const requestId = state.rewriteRequestId = (state.rewriteRequestId || 0) + 1;
+  clearTimeout(state.rewritePollTimer);
+  const assetId = state.readerFocus === 'rewrite' ? state.readerAssetId : '';
+  const current = () => state.activeEntry?.id === entry.id && state.rewriteRequestId === requestId;
   state.rewriteLoading = true;
-  renderRewrite(null);
+  if (!poll) renderRewrite(null, { status: 'loading' });
   try {
-    const assetId = state.readerFocus === 'rewrite' ? state.readerAssetId : '';
     const query = assetId ? `?assetId=${encodeURIComponent(assetId)}` : '';
     const data = await api(`/api/entry/${entry.id}/rewrite${query}`);
-    if (state.activeEntry?.id !== entry.id) return;
-    renderRewrite(data.rewrite);
-    if (data.rewrite && data.rewrite.body) {
+    if (!current()) return;
+    const status = data.rewrite?.body?.trim() ? 'ready' : data.status || 'not_ready';
+    renderRewrite(data.rewrite, { status });
+    if (data.rewrite?.body?.trim()) {
+      // Readiness is retained even when the original list used a compact payload.
+      state.activeEntry = { ...state.activeEntry, rewriteReady: true, rewriteStatus: 'ready' };
       updateEntryAssets(entry.id, entryAssetHelpfulPatch('rewrite', data.rewrite), { rerenderList: false });
       renderList();
-    } else if (state.readerTab === 'rewrite' && state.readerFocus !== 'rewrite') {
-      if (!renderRewriteAvailabilityPlaceholder(entry)) setReaderTab('original');
+    } else if (!assetId && ['queued', 'processing', 'retrying', 'not_ready'].includes(status) && data.retryAfterMs > 0) {
+      const delay = Math.min(15000, Math.max(3000, Number(data.retryAfterMs) || 5000));
+      state.rewritePollTimer = setTimeout(() => {
+        if (!current()) return;
+        const exhausted = Date.now() - startedAt >= 90000;
+        if (exhausted || document.hidden || state.readerTab !== 'rewrite') {
+          if (status !== 'not_ready') renderRewrite(null, { status: 'waiting' });
+          return;
+        }
+        return loadRewrite(entry, { poll: true, startedAt });
+      }, delay);
     }
   } catch {
-    renderRewrite(null);
+    if (current()) renderRewrite(null, { status: 'error' });
   } finally {
-    state.rewriteLoading = false;
-    if (state.activeEntry?.id === entry.id) maybeGenerateRewriteAfterLoad(entry);
+    if (current()) state.rewriteLoading = false;
   }
 }
 
@@ -6074,9 +6130,15 @@ async function generateTranslation({ force = false } = {}) {
   }
   if (state.translationGenerating) return;
   if (!requireAuth('login')) return;
+  const requestId = state.translationRequestId = (state.translationRequestId || 0) + 1;
+  const current = () => state.activeEntry?.id === entry.id && state.translationRequestId === requestId;
   state.readerAssetId = '';
   setReaderTab('translation');
   state.translationGenerating = true;
+  if (!state.translation) {
+    renderTranslation(null, { loading: true });
+    $('#translation-empty p').innerHTML = '<span class="reading-asset-spinner" aria-hidden="true"></span>正在生成中文译文…';
+  }
   btn.disabled = true;
   btn.textContent = '翻译中…';
   try {
@@ -6086,21 +6148,23 @@ async function generateTranslation({ force = false } = {}) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ force }),
     });
-    if (state.activeEntry?.id !== entry.id) return;
+    if (!current()) return;
     if (data.entry) applyServerEntryUpdate(data.entry);
     renderTranslation(data.translation);
     if (data.translation && Array.isArray(data.translation.content) && data.translation.content.length) {
       updateEntryAssets(entry.id, entryAssetHelpfulPatch('translation', data.translation), { rerenderList: false });
       renderList();
     }
-    setReaderTab('translation');
     toast(data.originalFetched ? '已获取原文并保存双语翻译' : data.cached ? '已显示缓存翻译' : '双语翻译已保存');
   } catch (err) {
+    if (!current()) return;
+    if (!state.translation) renderTranslation(null, { error: true });
     if (/API Key|未配置|Authentication|authentication|invalid_request_error|401/i.test(err.message)) {
       openAiConfigModal('translation', 'translation');
     }
     toast('翻译失败: ' + err.message, 5000);
   } finally {
+    if (!current()) return;
     state.translationGenerating = false;
     btn.disabled = false;
     if (!state.translation) btn.textContent = '生成中文翻译';
@@ -6118,9 +6182,14 @@ async function generateRewrite({ force = false } = {}) {
   }
   if (state.rewriteGenerating) return;
   if (!requireAuth('login')) return;
+  const requestId = state.rewriteRequestId = (state.rewriteRequestId || 0) + 1;
+  const current = () => state.activeEntry?.id === entry.id && state.rewriteRequestId === requestId;
+  clearTimeout(state.rewritePollTimer);
+  state.rewriteLoading = false;
   state.readerAssetId = '';
   setReaderTab('rewrite');
   state.rewriteGenerating = true;
+  if (!state.rewrite?.body) renderRewrite(null, { status: 'processing' });
   btn.disabled = true;
   btn.textContent = rewriteUiCopy(entry).generating;
   try {
@@ -6130,22 +6199,24 @@ async function generateRewrite({ force = false } = {}) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ force }),
     });
-    if (state.activeEntry?.id !== entry.id) return;
+    if (!current()) return;
     if (data.entry) applyServerEntryUpdate(data.entry);
     renderRewrite(data.rewrite);
     if (data.rewrite && data.rewrite.body) {
       updateEntryAssets(entry.id, entryAssetHelpfulPatch('rewrite', data.rewrite), { rerenderList: false });
       renderList();
     }
-    setReaderTab('rewrite');
     const copyTextForEntry = rewriteUiCopy(state.activeEntry || entry);
     toast(data.originalFetched ? copyTextForEntry.fetched : data.cached ? copyTextForEntry.cached : copyTextForEntry.saved);
   } catch (err) {
+    if (!current()) return;
+    if (!state.rewrite?.body) renderRewrite(null, { status: 'failed' });
     if (/API Key|未配置|Authentication|authentication|invalid_request_error|401/i.test(err.message)) {
       openAiConfigModal('rewrite', 'rewrite');
     }
     toast(rewriteUiCopy(entry).failedPrefix + err.message, 5000);
   } finally {
+    if (!current()) return;
     state.rewriteGenerating = false;
     btn.disabled = false;
     const copyTextForEntry = rewriteUiCopy(state.activeEntry || entry);
@@ -8454,6 +8525,7 @@ function retryAgentMessage(failed) {
 }
 
 async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentId = '', annotationId = '', chatMessageId = '', updateUrl = true, replaceUrl = false } = {}) {
+  clearTimeout(state.rewritePollTimer);
   setPodcastMode(false);
   setWorkspacePage('');
   const previousEntryId = state.activeEntry?.id || '';
@@ -8607,6 +8679,7 @@ async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentI
 }
 
 function closeReaderFromRoute({ rerenderList = true } = {}) {
+  clearTimeout(state.rewritePollTimer);
   setWorkspacePage('');
   state.activeEntry = null;
   state.agentMessages = [];
