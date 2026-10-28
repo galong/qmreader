@@ -52,3 +52,29 @@ test('stalled body is aborted before alternate response and caller cancellation 
   await assert.rejects(reader()('/api/entry/test',{publicRead:true,signal:controller.signal},{origin:'https://rss.qiaomu.ai',fetch:async ()=>{cancelledCalls++;throw new TypeError('abort');}}),{name:'AbortError'});
   assert.equal(cancelledCalls,1);
 });
+
+test('a slow authenticated read keeps its full deadline instead of restarting halfway', async () => {
+  let calls = 0;
+  const result = await reader()('/api/entry/test', { publicRead: false, timeoutMs: 1000 }, {
+    origin: 'https://rss.qiaomu.ai', fetch: async (_url, options) => {
+      calls++;
+      return { ok: true, headers: new Headers(), text: () => new Promise((resolve, reject) => {
+        const timer = setTimeout(() => resolve('{"entry":{"id":"test"}}'), 650);
+        options.signal.addEventListener('abort', () => { clearTimeout(timer); reject(new TypeError('aborted')); }, { once: true });
+      }) };
+    }
+  });
+  assert.equal(result.entry.id, 'test');
+  assert.equal(calls, 1);
+});
+
+test('a stalled authenticated body still stops at the total deadline', async () => {
+  let calls = 0;
+  await assert.rejects(reader()('/api/entry/test', { publicRead: false, timeoutMs: 100 }, {
+    origin: 'https://rss.qiaomu.ai', fetch: async () => {
+      calls++;
+      return { ok: true, headers: new Headers(), text: () => new Promise(() => {}) };
+    }
+  }), /超时/);
+  assert.equal(calls, 1);
+});

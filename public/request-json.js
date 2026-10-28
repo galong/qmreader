@@ -42,7 +42,10 @@
             return data;
           })(),
           new Promise((_, reject) => {
-            timer = setTimeout(() => { expired = true; controller.abort(); reject(Error('请求超时，请重试')); }, Math.min(remaining, retryable && !attempt ? totalMs / 2 : remaining));
+            // Reserve time only for a genuinely different public route. Restarting
+            // the same authenticated download halfway can make a healthy slow read
+            // fail twice without ever using its full deadline.
+            timer = setTimeout(() => { expired = true; controller.abort(); reject(Error('请求超时，请重试')); }, Math.min(remaining, eligible && !attempt ? totalMs / 2 : remaining));
           }),
         ]);
       } catch (error) {

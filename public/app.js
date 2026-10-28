@@ -434,6 +434,7 @@ function normalizeReaderOpenTab(tab) {
 }
 
 function setCurrentUser(user, { resetProfileDraft = true } = {}) {
+  if (state.authReady && state.me?.id !== user?.id) entryPrefetches.clear();
   state.authRevision = (state.authRevision || 0) + 1;
   state.authReady = true;
   state.authRestoreFailed = false;
@@ -1797,6 +1798,10 @@ function rewriteAiConfig() {
 }
 
 async function api(path, opts) {
+  if (opts?.method && opts.method.toUpperCase() !== 'GET') {
+    const changed = path.match(/^\/api\/entry\/([^/?]+)(?:\/(?:rewrite|content))?(?:\?|$)/);
+    if (changed) entryPrefetches.delete(changed[1]);
+  }
   const headers = { ...(opts && opts.headers ? opts.headers : {}) };
   if (opts && opts.aiConfig) Object.assign(headers, aiHeadersFromConfig(opts.aiConfig));
   else if (opts && opts.ai) Object.assign(headers, aiHeaders());
@@ -4089,19 +4094,21 @@ function listSummaryText(summary) {
 /* UI-MOBILE: article prefetch. On pointer-down / hover intent we start
    GET /api/entry/:id so the body is usually in hand by the time click fires. */
 const entryPrefetches = new Map();
+function retainEntryBundle(id, task) {
+  entryPrefetches.set(id, task);
+  if (entryPrefetches.size > 24) entryPrefetches.delete(entryPrefetches.keys().next().value);
+  const remove = () => { if (entryPrefetches.get(id) === task) entryPrefetches.delete(id); };
+  // Short-lived, account-scoped memory only. Returning to a just-read article
+  // must not blank already delivered text while another request struggles.
+  setTimeout(remove, 30000);
+  task.then(data => { if (!data?.rewrite?.body?.trim()) remove(); }, remove);
+  return task;
+}
+
 function prefetchEntry(entryId) {
   const id = String(entryId || '');
   if (!id || state.activeEntry?.id === id || contentCache.has(id) || entryPrefetches.has(id)) return entryPrefetches.get(id) || null;
-  const task = api(`/api/entry/${id}`).catch(() => {
-    if (entryPrefetches.get(id) === task) entryPrefetches.delete(id);
-    return null;
-  });
-  entryPrefetches.set(id, task);
-  setTimeout(() => { if (entryPrefetches.get(id) === task) entryPrefetches.delete(id); }, 5000);
-  task.then(() => {
-    if (entryPrefetches.size > 24) entryPrefetches.delete(entryPrefetches.keys().next().value);
-  });
-  return task;
+  return retainEntryBundle(id, api(`/api/entry/${id}`)).catch(() => null);
 }
 
 function takeArticleBootstrap(entryId) {
@@ -4113,15 +4120,16 @@ function takeArticleBootstrap(entryId) {
     const matches = data.entry?.id === entryId || (String(entryId).length >= 12 && data.entry?.id?.startsWith(entryId));
     // It belongs to this no-store HTML response and is consumed once. Slow script
     // downloads must not discard a body already received with the document.
-    if (data.version === 1 && data.pathname === window.location.pathname && matches) return data;
+    if (data.version === 1 && data.pathname === window.location.pathname && matches) {
+      if (!data.rewriteAssetId) retainEntryBundle(data.entry.id, Promise.resolve(data));
+      return data;
+    }
   } catch { /* Invalid inline data falls back to an authoritative read. */ }
   return null;
 }
 
 function readEntryBundle(entryId) {
-  const task = entryPrefetches.get(entryId);
-  entryPrefetches.delete(entryId);
-  return task ? task.then(data => data || api(`/api/entry/${entryId}`)) : api(`/api/entry/${entryId}`);
+  return entryPrefetches.get(entryId) || retainEntryBundle(entryId, api(`/api/entry/${entryId}`));
 }
 
 /* UI-MOBILE: infinite list. The last "load more" row doubles as a sentinel:
