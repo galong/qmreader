@@ -407,6 +407,7 @@
   const konami = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'];
   let konamiAt = 0;
   document.addEventListener('keydown', event => {
+    if (typeof event.key !== 'string') return;
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
     konamiAt = key === konami[konamiAt] ? konamiAt + 1 : key === konami[0] ? 1 : 0;
     if (konamiAt === konami.length) {

@@ -4091,13 +4091,37 @@ function listSummaryText(summary) {
 const entryPrefetches = new Map();
 function prefetchEntry(entryId) {
   const id = String(entryId || '');
-  if (!id || contentCache.has(id) || entryPrefetches.has(id)) return entryPrefetches.get(id) || null;
-  const task = api(`/api/entry/${id}`).catch(() => null);
+  if (!id || state.activeEntry?.id === id || contentCache.has(id) || entryPrefetches.has(id)) return entryPrefetches.get(id) || null;
+  const task = api(`/api/entry/${id}`).catch(() => {
+    if (entryPrefetches.get(id) === task) entryPrefetches.delete(id);
+    return null;
+  });
   entryPrefetches.set(id, task);
+  setTimeout(() => { if (entryPrefetches.get(id) === task) entryPrefetches.delete(id); }, 5000);
   task.then(() => {
     if (entryPrefetches.size > 24) entryPrefetches.delete(entryPrefetches.keys().next().value);
   });
   return task;
+}
+
+function takeArticleBootstrap(entryId) {
+  const node = document.getElementById('qm-article-bootstrap');
+  if (!node) return null;
+  node.remove();
+  try {
+    const data = JSON.parse(node.textContent);
+    const matches = data.entry?.id === entryId || (String(entryId).length >= 12 && data.entry?.id?.startsWith(entryId));
+    // It belongs to this no-store HTML response and is consumed once. Slow script
+    // downloads must not discard a body already received with the document.
+    if (data.version === 1 && data.pathname === window.location.pathname && matches) return data;
+  } catch { /* Invalid inline data falls back to an authoritative read. */ }
+  return null;
+}
+
+function readEntryBundle(entryId) {
+  const task = entryPrefetches.get(entryId);
+  entryPrefetches.delete(entryId);
+  return task ? task.then(data => data || api(`/api/entry/${entryId}`)) : api(`/api/entry/${entryId}`);
 }
 
 /* UI-MOBILE: infinite list. The last "load more" row doubles as a sentinel:
@@ -6047,16 +6071,18 @@ function copyRewriteText() {
   copyText(state.rewrite && state.rewrite.body, rewriteUiCopy().copied);
 }
 
-async function loadRewrite(entry, { poll = false, startedAt = Date.now() } = {}) {
+async function loadRewrite(entry, { poll = false, startedAt = Date.now(), readingTask = null } = {}) {
   const requestId = state.rewriteRequestId = (state.rewriteRequestId || 0) + 1;
   clearTimeout(state.rewritePollTimer);
   const assetId = state.readerFocus === 'rewrite' ? state.readerAssetId : '';
   const current = () => state.activeEntry?.id === entry.id && state.rewriteRequestId === requestId;
   state.rewriteLoading = true;
-  if (!poll) renderRewrite(null, { status: 'loading' });
   try {
+    if (!poll) renderRewrite(null, { status: 'loading' });
     const query = assetId ? `?assetId=${encodeURIComponent(assetId)}` : '';
-    const data = await api(`/api/entry/${entry.id}/rewrite${query}`);
+    const reading = readingTask ? await readingTask : null;
+    const bundled = reading && Object.prototype.hasOwnProperty.call(reading, 'rewrite') && (reading.rewriteAssetId || '') === assetId;
+    const data = bundled ? { rewrite: reading.rewrite, ...reading.readingState?.rewrite } : await api(`/api/entry/${entry.id}/rewrite${query}`);
     if (!current()) return;
     const status = data.rewrite?.body?.trim() ? 'ready' : data.status || 'not_ready';
     renderRewrite(data.rewrite, { status });
@@ -8524,7 +8550,7 @@ function retryAgentMessage(failed) {
   sendAgentMessage(failed.retryText);
 }
 
-async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentId = '', annotationId = '', chatMessageId = '', updateUrl = true, replaceUrl = false } = {}) {
+async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentId = '', annotationId = '', chatMessageId = '', updateUrl = true, replaceUrl = false, readingPayload = null } = {}) {
   clearTimeout(state.rewritePollTimer);
   setPodcastMode(false);
   setWorkspacePage('');
@@ -8603,8 +8629,11 @@ async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentI
   updateFetchOriginalButton(e);
   setReaderTab(requestedTab, { syncUrl: false });
   if (shouldHoldOriginal(e)) renderRewriteAvailabilityPlaceholder(e);
+  // One authoritative response provides both original and ready Chinese text.
+  // A deep link already received this data with its HTML; no second body request.
+  const readingTask = readingPayload ? Promise.resolve(readingPayload) : readEntryBundle(e.id);
   loadTranslation(e);
-  loadRewrite(e);
+  loadRewrite(e, { readingTask });
   loadAnnotations(e);
   loadComments(e);
   loadAgentMessages(e);
@@ -8662,7 +8691,7 @@ async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentI
     $('#reader-content').innerHTML = '<div class="reader-skeleton" role="status" aria-label="正在加载正文"><span></span><span></span><span></span><span></span></div>';
     try {
       // UI-MOBILE: reuse an in-flight prefetch (pointer-down / hover) when there is one.
-      const data = (await (entryPrefetches.get(e.id) || prefetchEntry(e.id))) || await api(`/api/entry/${e.id}`);
+      const data = await readingTask;
       if (data.entry && state.activeEntry?.id === e.id) {
         state.activeEntry = { ...state.activeEntry, ...data.entry };
       }
@@ -8721,13 +8750,14 @@ function closeReaderFromRoute({ rerenderList = true } = {}) {
 async function openEntryById(entryId, { tab = null, focus = null, aiAssetId = '', commentId = '', annotationId = '', chatMessageId = '', updateUrl = false, replaceUrl = true } = {}) {
   const id = String(entryId || '').trim();
   if (!id) return false;
-  let entry = state.entries.find(item => item.id === id);
+  let readingPayload = takeArticleBootstrap(id);
+  let entry = readingPayload?.entry || state.entries.find(item => item.id === id);
   if (!entry) {
-    const data = await api(`/api/entry/${encodeURIComponent(id)}`);
-    entry = data.entry;
+    readingPayload = await readEntryBundle(id);
+    entry = readingPayload.entry;
   }
   if (!entry) return false;
-  await openEntry(entry, { tab, focus, aiAssetId, commentId, annotationId, chatMessageId, updateUrl, replaceUrl });
+  await openEntry(entry, { tab, focus, aiAssetId, commentId, annotationId, chatMessageId, updateUrl, replaceUrl, readingPayload });
   return true;
 }
 
@@ -11090,6 +11120,7 @@ window.addEventListener('popstate', () => { mobileReaderFromList = false; });
     if (!state.agentCollapsed) setAgentCollapsed(true, { persist: false }); // article first; AI is one tap away
   }, true);
   list.addEventListener('pointerdown', event => {
+    clearTimeout(hoverTimer);
     const id = cardId(event.target);
     if (id) prefetchEntry(id);
   }, { passive: true });
@@ -11131,6 +11162,7 @@ window.addEventListener('popstate', () => { mobileReaderFromList = false; });
   });
   try {
     const route = routeStateFromUrl();
+    const articleTask = route.entryId ? openEntryFromUrl({ reuseLoadedCollections: true }) : null;
     let data;
     if (route.view === 'contributors') {
       state.contributorSort = route.contributorSort;
@@ -11150,7 +11182,8 @@ window.addEventListener('popstate', () => { mobileReaderFromList = false; });
       data = await loadSources();
       await authTask;
     }
-    await openEntryFromUrl({ reuseLoadedCollections: true });
+    if (articleTask) await articleTask;
+    else await openEntryFromUrl({ reuseLoadedCollections: true });
     // first boot: server may still be fetching — poll a few times
     if (data.refreshing || state.entries.length === 0) {
       for (let i = 0; i < 40; i++) {
