@@ -1805,7 +1805,7 @@ async function api(path, opts) {
   const rest = { ...(opts || {}) };
   delete rest.ai;
   delete rest.aiConfig;
-  return window.qmRequestJson(path, { ...rest, headers });
+  return window.qmRequestJson(path, { ...rest, headers, publicRead: !state.me && !opts?.ai && !opts?.aiConfig });
 }
 
 async function loadSources() {
