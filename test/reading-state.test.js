@@ -66,6 +66,25 @@ test('an already generated Chinese article shows loading, never missing, while i
   assert.equal(r.$('#rewrite-empty').classList.contains('hidden'), true);
 });
 
+test('a ready body in the page/detail response needs no extra rewrite request', async () => {
+  const r = reader();
+  await r.loadRewrite(r.state.activeEntry, { readingTask: Promise.resolve({ entry: { id: 'a' }, rewrite: { body: 'already delivered' }, readingState: { rewrite: { status: 'ready' } } }) });
+  assert.equal(r.requests.length, 0);
+  assert.match(r.$('#rewrite-content').innerHTML, /already delivered/);
+  assert.equal(r.state.rewriteLoading, false);
+  assert.equal(r.$('#rewrite-empty').classList.contains('hidden'), true);
+});
+
+test('an exact rewrite never renders another version from a generic detail bundle', async () => {
+  const r = reader(); r.state.readerFocus = 'rewrite'; r.state.readerAssetId = 'specific';
+  const pending = r.loadRewrite(r.state.activeEntry, { readingTask: Promise.resolve({ rewrite: { body: 'wrong default' }, rewriteAssetId: '' }) });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(r.requests.length, 1);
+  r.requests[0].resolve({ rewrite: { body: 'correct contribution' }, status: 'ready' }); await pending;
+  assert.match(r.$('#rewrite-content').innerHTML, /correct contribution/);
+  assert.doesNotMatch(r.$('#rewrite-content').innerHTML, /wrong default/);
+});
+
 test('failed requests are retryable loading errors, not missing Chinese content', async () => {
   const r = reader(); const pending = r.loadRewrite(r.state.activeEntry);
   r.requests[0].reject(new Error('offline')); await pending;

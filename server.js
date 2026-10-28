@@ -21,7 +21,7 @@ const { SOURCES, registerPodcastSource, registerWechatSource } = require('./lib/
 const podscribeEntry = require('./lib/podscribe-entry');
 const { createResponseCache, sendCached, compactEntry } = require('./lib/response-cache');
 const { clientIp } = require('./lib/client-ip');
-const { renderReadBootstrap } = require('./lib/read-bootstrap');
+const { renderReadBootstrap, renderArticleBootstrap } = require('./lib/read-bootstrap');
 const apiV1 = require('./lib/api-v1');
 const { readingAssetState } = require('./lib/reading-state');
 
@@ -1789,8 +1789,13 @@ function renderIndex(req, entry = null) {
   const html = fs.readFileSync(INDEX_PATH, 'utf8');
   const { title, tags } = socialMetaTags(req, entry);
   const umami = umamiConfigTag(req);
-  // Public metadata only, tied to this HTML response; no persistent browser cache.
+  // Article data is scoped to this viewer and this no-store HTML response.
   let bootstrap = '';
+  if (entry) {
+    const route = articleRouteFromRequest(req);
+    const assetId = route?.focus === 'rewrite' ? route.itemId : '';
+    bootstrap = renderArticleBootstrap(articleReadingResponse(entry, req.user, assetId), req.path);
+  }
   if (!entry && req.path === '/' && !Object.keys(req.query).length) {
     try {
       bootstrap = renderReadBootstrap(fetcher.getEntries({ limit: 40, minimal: true, viewer: null, allowedOptInSourceIds: new Set() }).map(mediaListEntry));
@@ -1901,7 +1906,7 @@ app.get(/^\/articles\/.+$/, (req, res) => {
   if (normalizePathForCompare(req.path) !== normalizePathForCompare(canonicalPath)) {
     return res.redirect(301, publicUrl(req, canonicalPath));
   }
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'private, no-store');
   res.type('html').send(renderIndex(req, entry));
 });
 
@@ -2230,6 +2235,12 @@ function rewriteReadingState(entry, rewrite, assetId = '') {
     (!AUTO_REWRITE_SOURCE_IDS.size || AUTO_REWRITE_SOURCE_IDS.has(entry.sourceId)) && deepseek.getConfig().configured);
   return readingAssetState({ asset: rewrite, automatic, exactAsset: Boolean(assetId),
     job: rewrite?.body || assetId ? null : store.getRewriteStatusSummaries([entry.id])[entry.id] });
+}
+
+function articleReadingResponse(entry, viewer = null, assetId = '') {
+  const rewrite = rewriteResponse(entry, viewer, assetId);
+  return { entry: wechatImages.rewriteEntry(entry), rewrite, rewriteAssetId: assetId || '',
+    readingState: { rewrite: rewriteReadingState(entry, rewrite, assetId) } };
 }
 
 function rewriteResponse(entry, viewer = null, assetId = '') {
@@ -3434,7 +3445,8 @@ app.get('/api/sources/:id/entries', (req, res) => {
 app.get('/api/entry/:id', (req, res) => {
   const entry = entryByIdOrPrefix(req.params.id, req.user);
   if (!entry) return res.status(404).json({ error: 'entry not found' });
-  res.json({ entry: wechatImages.rewriteEntry(entry) });
+  res.setHeader('Cache-Control', req.user ? 'private, no-store' : 'no-store');
+  res.json(articleReadingResponse(entry, req.user));
 });
 
 app.delete('/api/entry/:id', requireAdmin, (req, res) => {

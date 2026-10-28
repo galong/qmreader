@@ -228,6 +228,8 @@ node scripts/refresh-worker.js --kind=auto-rewrite --sources=hackernews
 
 `GET /api/v1/entries/:id?include=rewrite` 同时返回 `readingState.rewrite`，精简列表保留 `rewriteReady` / `rewriteStatus`。客户端先显示加载态，再按读取结果呈现正文；可以按 `retryAfterMs` 有限轮询，离开文章或切到原文后停止。读取接口不会触发付费生成。后台仍按既有的源设置和处理范围预生成中文改写，逐段直译是独立资产。
 
+`GET /api/entry/:id` 在 `entry` 之外直接返回 `rewrite`、`rewriteAssetId` 和 `readingState.rewrite`，一次读取即可拿到原文及已有中文。文章深链的 HTML 也会携带当前读者可见的这份数据，页面先打开文章，目录、账户及列表同步独立进行；已有正文不再依赖第二次改写请求。HTML 使用 `private, no-store`，内嵌数据仅供当前页面消费一次，不写入持久缓存。
+
 ## 部署
 
 ### systemd 推荐路径
