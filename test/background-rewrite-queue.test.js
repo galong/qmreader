@@ -1,4 +1,4 @@
-// Planning specifications copied from production; target exports are not implemented.
+// Queue processing contract (formerly docs/planned-tests).
 const { after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -8,10 +8,10 @@ const path = require('node:path');
 const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qmreader-background-test-'));
 process.env.QMREADER_DATA_DIR = testDataDir;
 
-const fetcher = require('../../lib/fetcher');
-const deepseek = require('../../lib/deepseek');
-const store = require('../../lib/store');
-const jobs = require('../../lib/background-jobs');
+const fetcher = require('../lib/fetcher');
+const deepseek = require('../lib/deepseek');
+const store = require('../lib/store');
+const jobs = require('../lib/background-jobs');
 
 after(() => fs.rmSync(testDataDir, { recursive: true, force: true }));
 

@@ -2405,6 +2405,7 @@ function normalizeBackgroundJob(job = {}) {
     reason,
     fetchOnly: Boolean(job.fetchOnly),
     catchup: Boolean(job.catchup),
+    queue: Boolean(job.queue),
     requestedAt: Date.now(),
   };
 }
@@ -2471,8 +2472,10 @@ function queueAutoRewriteForRefresh(refresh, job = {}) {
   const sourceIds = autoRewriteSourceIdsFromRefresh(refresh, job)
     .filter(id => fetcher.getSourceById(id)?.autoRewrite !== false);
   if (!sourceIds.length) return { started: false, skipped: 'no changed sources' };
+  // The fetch worker already wrote the jobs to SQLite; this only drains them.
   return startAutoRewriteJob({
     kind: 'auto-rewrite',
+    queue: true,
     sourceIds,
     reason: `after-${job.reason || 'refresh'}`,
   });
@@ -2540,6 +2543,7 @@ function finishAiJob({ result = null, error = null, code = 0, signal = '' } = {}
     aiQueuedSourceIds.clear();
     setTimeout(() => startAutoRewriteJob({
       kind: 'auto-rewrite',
+      queue: true,
       sourceIds: queued,
       reason: 'queued',
     }), 0);
@@ -2721,9 +2725,15 @@ function startAutoRewriteJob(job = {}) {
   worker.on('error', error => {
     workerError = error;
   });
+  const workerPid = worker.pid;
   worker.on('exit', (code, signal) => {
     const failed = workerError || code;
     if (failed) console.warn('AI worker exited with error:', workerError && workerError.message ? workerError.message : code);
+    // Hand a crashed worker's leased job back now instead of after its lease.
+    if (failed || signal) {
+      try { store.releaseRewriteWorker(`ai-${workerPid}`, `AI worker exited (${signal || code})`); }
+      catch (error) { console.warn('Rewrite lease release failed:', error.message || error); }
+    }
     finishAiJob({ result: workerResult, error: workerError, code, signal });
   });
   worker.send({ type: 'run', job: { ...normalized, sourceIds: uniqueSourceIds } });
