@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('node:crypto');
+const os = require('node:os');
 const { fork } = require('child_process');
 const compression = require('compression');
 const fetcher = require('./lib/fetcher');
@@ -19,7 +20,7 @@ const podscribe = require('./lib/podscribe');
 const wechatCatalog = require('./lib/wechat-catalog');
 const { SOURCES, registerPodcastSource, registerWechatSource } = require('./lib/sources');
 const podscribeEntry = require('./lib/podscribe-entry');
-const { createResponseCache, sendCached, compactEntry } = require('./lib/response-cache');
+const { createResponseCache, sendCached, compactEntry, dataStamp } = require('./lib/response-cache');
 const { clientIp } = require('./lib/client-ip');
 const { renderReadBootstrap, renderArticleBootstrap } = require('./lib/read-bootstrap');
 const apiV1 = require('./lib/api-v1');
@@ -47,6 +48,7 @@ const STARTUP_REFRESH_DELAY_MS = parseInt(process.env.STARTUP_REFRESH_DELAY_MS |
 const SOURCE_INTERACTION_REFRESH_COOLDOWN_MS = parseInt(process.env.SOURCE_INTERACTION_REFRESH_COOLDOWN_MS || `${5 * MINUTE_MS}`, 10);
 const FRESHNESS_SWEEP_INTERVAL_MS = parseInt(process.env.FRESHNESS_SWEEP_INTERVAL_MS || `${5 * MINUTE_MS}`, 10);
 const FRESHNESS_STARTUP_DELAY_MS = parseInt(process.env.FRESHNESS_STARTUP_DELAY_MS || `${2 * MINUTE_MS}`, 10);
+const WORKER_NICENESS = parseInt(process.env.WORKER_NICENESS || '10', 10);
 const REWRITE_CATCHUP_INTERVAL_MS = parseInt(process.env.REWRITE_CATCHUP_INTERVAL_MS || `${10 * MINUTE_MS}`, 10);
 const REWRITE_CATCHUP_STARTUP_DELAY_MS = parseInt(process.env.REWRITE_CATCHUP_STARTUP_DELAY_MS || `${4 * MINUTE_MS}`, 10);
 const FRESHNESS_SWEEP_BATCH_SIZE = parseInt(process.env.FRESHNESS_SWEEP_BATCH_SIZE || '3', 10);
@@ -1892,12 +1894,28 @@ app.get('/purify.min.js', (req, res) => {
   res.type('application/javascript').sendFile(DOMPURIFY_PATH);
 });
 
+// The anonymous home page embeds the public first list; rebuilding it costs a
+// list query on every visit, so reuse it until the data changes or 10s pass.
+let homePageCache = null;
+function anonymousHomePage(req) {
+  const key = `${req.protocol}|${req.get('host') || ''}`;
+  const stamp = dataStamp();
+  const now = Date.now();
+  if (homePageCache && homePageCache.key === key && homePageCache.stamp === stamp && homePageCache.until > now) {
+    return homePageCache.html;
+  }
+  const html = renderIndex(req, null);
+  homePageCache = { key, stamp, html, until: now + 10000 };
+  return html;
+}
+
 app.get('/', (req, res) => {
   const entryId = String(req.query.entry || '').trim();
   const entry = entryId ? fetcher.getEntryById(entryId) : null;
   if (entry) return res.redirect(301, entryPublicUrl(req, entry));
   res.setHeader('Cache-Control', 'no-cache');
-  res.type('html').send(renderIndex(req, entry));
+  const cacheable = !req.user && !Object.keys(req.query).length;
+  res.type('html').send(cacheable ? anonymousHomePage(req) : renderIndex(req, entry));
 });
 
 app.get(/^\/articles\/.+$/, (req, res) => {
@@ -2340,6 +2358,14 @@ function seedAdminFromEnv() {
   }
 }
 
+// Fetch and AI workers (and the per-source children they fork, which inherit
+// the niceness) yield the CPU to page and API requests on a contended host.
+function lowerWorkerPriority(worker) {
+  if (!Number.isFinite(WORKER_NICENESS) || WORKER_NICENESS <= 0 || !worker.pid) return;
+  try { os.setPriority(worker.pid, Math.min(19, WORKER_NICENESS)); }
+  catch (error) { console.warn('Worker priority unchanged:', error.message || error); }
+}
+
 function normalizeBackgroundJob(job = {}) {
   const kind = String(job.kind || 'refresh').trim();
   const sourceId = String(job.sourceId || '').trim();
@@ -2520,6 +2546,7 @@ function startFetchJob(job = {}) {
     env: { ...process.env, QMREADER_WORKER_KIND: 'fetch' },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
+  lowerWorkerPriority(worker);
   refreshWorker = worker;
   require('./.rss-reliability/watchdog.cjs').watch(worker);
   let workerResult = null;
@@ -2620,6 +2647,7 @@ function startAutoRewriteJob(job = {}) {
     env: { ...process.env, QMREADER_WORKER_KIND: 'ai' },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
+  lowerWorkerPriority(worker);
   aiWorker = worker;
   let workerResult = null;
   let workerError = null;
