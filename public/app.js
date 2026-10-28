@@ -5958,7 +5958,7 @@ function restoreRewriteEmptyCopy() {
   empty.innerHTML = '';
 }
 
-function renderRewriteAvailabilityPlaceholder(entry = state.activeEntry, status = '') {
+function renderRewriteAvailabilityPlaceholder(entry = state.activeEntry, status = '', reason = '') {
   const empty = $('#rewrite-empty');
   if (!empty) return false;
   if (!status) {
@@ -5971,12 +5971,15 @@ function renderRewriteAvailabilityPlaceholder(entry = state.activeEntry, status 
     processing: ['正在生成中文内容…', '完成后会自动显示，也可以先阅读原文。', true],
     retrying: ['中文内容正在重试生成…', '完成后会自动显示，也可以先阅读原文。', true],
     waiting: ['中文内容仍在后台处理中', '可以先阅读原文，稍后查看处理结果。', false],
-    not_ready: ['中文内容尚未就绪', '可以先阅读原文，稍后再试。', false],
+    not_ready: ['中文内容尚未就绪', '后台会自动补上，可以先阅读原文。', false],
     unavailable: ['这篇文章暂未提供中文内容', '可以先阅读原文。', false],
     failed: ['中文内容暂时无法生成', '可以先阅读原文，稍后再试。', false],
     error: ['中文内容加载失败', '请检查网络后重试，也可以先阅读原文。', false],
   }[status] || ['中文内容尚未就绪', '可以先阅读原文，稍后再试。', false];
-  const [label, hint, busy] = copy;
+  const [label, defaultHint, busy] = copy;
+  // Skips carry a reader-facing reason (e.g. the article is too short); model
+  // errors on failures stay in the server log.
+  const hint = reason && status === 'unavailable' ? `${reason}。可以先阅读原文。` : defaultHint;
   empty.classList.add('reading-asset-state');
   empty.setAttribute('role', 'status');
   empty.setAttribute('aria-live', 'polite');
@@ -6020,7 +6023,7 @@ async function revealOriginalForEntry() {
   updateFetchOriginalButton(state.activeEntry || entry);
 }
 
-function renderRewrite(rewrite, { status = rewrite?.body?.trim() ? 'ready' : 'not_ready' } = {}) {
+function renderRewrite(rewrite, { status = rewrite?.body?.trim() ? 'ready' : 'not_ready', reason = '' } = {}) {
   if (!rewrite?.body?.trim()) rewrite = null;
   state.rewrite = rewrite || null;
   state.rewriteLoadStatus = status;
@@ -6043,7 +6046,7 @@ function renderRewrite(rewrite, { status = rewrite?.body?.trim() ? 'ready' : 'no
     action.disabled = busy || Boolean(state.rewriteGenerating);
   }
   if (!rewrite || !rewrite.body) {
-    renderRewriteAvailabilityPlaceholder(state.activeEntry, status);
+    renderRewriteAvailabilityPlaceholder(state.activeEntry, status, reason);
     if (meta) {
       meta.textContent = '';
       meta.classList.add('hidden');
@@ -6093,7 +6096,7 @@ async function loadRewrite(entry, { poll = false, startedAt = Date.now(), readin
     const data = bundled ? { rewrite: reading.rewrite, ...reading.readingState?.rewrite } : await api(`/api/entry/${entry.id}/rewrite${query}`);
     if (!current()) return;
     const status = data.rewrite?.body?.trim() ? 'ready' : data.status || 'not_ready';
-    renderRewrite(data.rewrite, { status });
+    renderRewrite(data.rewrite, { status, reason: String(data.reason || '').replace(/[。.]+$/, '') });
     if (data.rewrite?.body?.trim()) {
       // Readiness is retained even when the original list used a compact payload.
       state.activeEntry = { ...state.activeEntry, rewriteReady: true, rewriteStatus: 'ready' };

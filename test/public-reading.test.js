@@ -71,6 +71,11 @@ test('real public HTTP serves first list, anonymous article and distinct minimal
   assert.ok(bootstrap.entries.every(entry => !['public-1', 'opt-in-secret'].includes(entry.id)));
   assert.equal('content' in bootstrap.entries[0], false);
   assert.ok(!response.headers.has('set-cookie'));
+  const bootstrapIds = async () => JSON.parse((await fetch(base + '/').then(r => r.text()))
+    .match(/<script id="qm-reader-bootstrap" type="application\/json">([\s\S]*?)<\/script>/)[1]).entries.map(entry => entry.id);
+  assert.ok((await bootstrapIds()).includes('public-2'), 'repeat visits reuse the cached home page');
+  store.softDeleteEntry('public-2');
+  assert.equal((await bootstrapIds()).includes('public-2'), false, 'a data change invalidates the cached home page at once');
   const [full, minimal, compact, webHot] = await Promise.all([
     fetch(base + '/api/entries?limit=40').then(r => r.json()),
     fetch(base + '/api/entries?limit=40&summary=minimal').then(r => r.json()),
