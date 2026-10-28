@@ -23,6 +23,7 @@ const { createResponseCache, sendCached, compactEntry } = require('./lib/respons
 const { clientIp } = require('./lib/client-ip');
 const { renderReadBootstrap } = require('./lib/read-bootstrap');
 const apiV1 = require('./lib/api-v1');
+const { readingAssetState } = require('./lib/reading-state');
 
 const app = express();
 const wechatImages = createWechatImageService();
@@ -2223,6 +2224,14 @@ function translationResponse(entry, viewer = null, assetId = '') {
   };
 }
 
+function rewriteReadingState(entry, rewrite, assetId = '') {
+  const source = fetcher.getSourceById(entry.sourceId);
+  const automatic = Boolean(source && source.enabled !== false && source.autoRewrite !== false &&
+    (!AUTO_REWRITE_SOURCE_IDS.size || AUTO_REWRITE_SOURCE_IDS.has(entry.sourceId)) && deepseek.getConfig().configured);
+  return readingAssetState({ asset: rewrite, automatic, exactAsset: Boolean(assetId),
+    job: rewrite?.body || assetId ? null : store.getRewriteStatusSummaries([entry.id])[entry.id] });
+}
+
 function rewriteResponse(entry, viewer = null, assetId = '') {
   const exactAssetId = String(assetId || '').trim();
   const rewrite = exactAssetId
@@ -3070,6 +3079,7 @@ apiV1.mount(app, {
   rewriteContent: entry => wechatImages.rewriteEntry(entry),
   translationResponse,
   rewriteResponse,
+  rewriteReadingState,
   publicUrl: entry => entryPublicPath(entry, '', '', { includeHash: false }),
   sourcesMeta: () => fetcher.getSourcesMeta(),
 });
@@ -3562,7 +3572,9 @@ app.get('/api/entry/:id/podscribe-transcript', podscribeReadRateLimit, async (re
 app.get('/api/entry/:id/translation', (req, res) => {
   const entry = fetcher.getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'entry not found' });
-  res.json({ translation: translationResponse(entry, req.user, req.query.assetId) });
+  const translation = translationResponse(entry, req.user, req.query.assetId);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ translation, ...readingAssetState({ asset: translation, kind: 'translation' }) });
 });
 
 app.post('/api/entry/:id/translation', requireLogin, async (req, res) => {
@@ -3592,7 +3604,9 @@ app.post('/api/entry/:id/translation', requireLogin, async (req, res) => {
 app.get('/api/entry/:id/rewrite', (req, res) => {
   const entry = fetcher.getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'entry not found' });
-  res.json({ rewrite: rewriteResponse(entry, req.user, req.query.assetId) });
+  const rewrite = rewriteResponse(entry, req.user, req.query.assetId);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ rewrite, ...rewriteReadingState(entry, rewrite, req.query.assetId) });
 });
 
 app.post('/api/entry/:id/rewrite', requireLogin, async (req, res) => {

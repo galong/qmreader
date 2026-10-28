@@ -224,6 +224,10 @@ node scripts/refresh-worker.js --kind=auto-rewrite --sources=hackernews
 
 需要登录或管理员权限的接口包括提交链接、生成翻译/改写、发布点评、文章对话、刷新源、启用/禁用源和违规用户管理等。详见 `server.js` 路由。
 
+中文内容读取会保留原有 `rewrite` / `translation` 字段，并返回 `status`、`automatic`、`retryAfterMs`。已有正文为 `ready`；近期任务为 `queued` / `processing` / `retrying`；自动改写已启用但没有可靠任务状态时为 `not_ready`，不代表正在生成；无法提供的版本为 `unavailable`，近期生成失败为 `failed`。网络失败使用 HTTP 错误，不能当作“没有中文内容”。指定不存在的 `assetId` 不会借用其他版本的状态。
+
+`GET /api/v1/entries/:id?include=rewrite` 同时返回 `readingState.rewrite`，精简列表保留 `rewriteReady` / `rewriteStatus`。客户端先显示加载态，再按读取结果呈现正文；可以按 `retryAfterMs` 有限轮询，离开文章或切到原文后停止。读取接口不会触发付费生成。后台仍按既有的源设置和处理范围预生成中文改写，逐段直译是独立资产。
+
 ## 部署
 
 ### systemd 推荐路径
