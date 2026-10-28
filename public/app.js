@@ -8558,7 +8558,23 @@ function retryAgentMessage(failed) {
   sendAgentMessage(failed.retryText);
 }
 
+function loadEntryExtrasAfterReading(entry, readingTask, openId) {
+  const load = () => {
+    if (state.activeEntry?.id !== entry.id || state.articleOpenId !== openId) return;
+    // Writes can wait on SQLite while a refresh worker holds its writer lock.
+    // Do not let those writes or supplementary reads delay delivery of the body.
+    recordEntryView(entry.id);
+    syncEntryState(entry.id, { read: true, viewed: true });
+    loadTranslation(entry);
+    loadAnnotations(entry);
+    loadComments(entry);
+    loadAgentMessages(entry);
+  };
+  void readingTask.then(load, load);
+}
+
 async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentId = '', annotationId = '', chatMessageId = '', updateUrl = true, replaceUrl = false, readingPayload = null } = {}) {
+  const openId = state.articleOpenId = (state.articleOpenId || 0) + 1;
   clearTimeout(state.rewritePollTimer);
   setPodcastMode(false);
   setWorkspacePage('');
@@ -8582,8 +8598,6 @@ async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentI
         ? 'rewrite'
         : normalizeReaderOpenTab(tab);
   state.read.add(e.id);
-  recordEntryView(e.id);
-  syncEntryState(e.id, { read: true, viewed: true });
   persist();
 
   const src = sourceById(e.sourceId);
@@ -8640,11 +8654,8 @@ async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentI
   // One authoritative response provides both original and ready Chinese text.
   // A deep link already received this data with its HTML; no second body request.
   const readingTask = readingPayload ? Promise.resolve(readingPayload) : readEntryBundle(e.id);
-  loadTranslation(e);
   loadRewrite(e, { readingTask });
-  loadAnnotations(e);
-  loadComments(e);
-  loadAgentMessages(e);
+  loadEntryExtrasAfterReading(e, readingTask, openId);
   if (updateUrl) syncReaderUrl({ replace: replaceUrl, commentId, annotationId, chatMessageId });
 
   let youtubeVideoId = '';
