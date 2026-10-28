@@ -644,7 +644,16 @@ body[data-theme="light"] #app > #reader-pane { background: var(--surface); }
 #app #reader-pane::-webkit-scrollbar { width: 8px; }
 #app #reader-pane::-webkit-scrollbar-thumb { background: transparent; border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
 #app #reader-pane.wb-scrolling::-webkit-scrollbar-thumb { background-color: rgba(120, 120, 120, 0.45); }
-@media (max-width: 760px) { #app .wb-prefs-wrap #reader-preferences { right: -90px; } }
+@media (max-width: 760px) {
+  #app .wb-prefs-wrap #reader-preferences {
+    position: fixed;
+    top: calc(108px + env(safe-area-inset-top, 0px));
+    left: auto;
+    right: 12px;
+    max-height: calc(100dvh - 120px - env(safe-area-inset-top, 0px));
+    width: min(332px, calc(100vw - 24px));
+  }
+}
 #app .reader-pref-grid { display: block; }
 #app .wb-prefs-ui { width: 100%; }
 #app .wb-chips button, #app .wb-seg button { min-width: 0; white-space: nowrap; padding: 0 4px; }

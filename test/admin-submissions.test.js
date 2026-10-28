@@ -274,6 +274,33 @@ test('admin API previews and deletes one reader submissions with permission and 
     const guardCookie = await login(baseUrl, guardUser.email, 'password-123');
     const adminMeResponse = await fetch(`${baseUrl}/api/me`, { headers: { Cookie: adminCookie } });
     const adminMe = (await adminMeResponse.json()).user;
+    // An administrator with a full legacy queue must still collect directly.
+    for (let i = 0; i < 3; i += 1) {
+      store.createSubmissionRequest({ url: `https://example.com/admin-legacy-${i}`, userId: adminMe.id });
+    }
+    const directPayload = {
+      url: 'https://example.com/admin-direct-collection',
+      title: '管理员直接收录',
+      markdown: '# 管理员直接收录\n\n这是管理员提供的文章正文，用于验证直接公开且不进入普通投稿审核队列。',
+    };
+    const directSubmit = await fetch(`${baseUrl}/api/submit-link`, {
+      method: 'POST',
+      headers: { Cookie: adminCookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify(directPayload),
+    });
+    assert.equal(directSubmit.status, 201);
+    const direct = await directSubmit.json();
+    assert.equal(direct.pending, false);
+    assert.equal(direct.entry.link, directPayload.url);
+    assert.ok(store.getSubmittedEntries().some(item => item.link === directPayload.url));
+    assert.equal(store.getSubmissionRequests().filter(item => item.userId === adminMe.id).length, 3);
+    const duplicateSubmit = await fetch(`${baseUrl}/api/submit-link`, {
+      method: 'POST', headers: { Cookie: adminCookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: directPayload.url }),
+    });
+    assert.equal(duplicateSubmit.status, 200);
+    assert.equal((await duplicateSubmit.json()).entry.id, direct.entry.id);
+
     const pendingRequest = store.createSubmissionRequest({
       url: 'https://example.com/api-pending',
       userId: guardUser.id,
@@ -302,7 +329,7 @@ test('admin API previews and deletes one reader submissions with permission and 
     const quarantinedSubmit = await fetch(`${baseUrl}/api/submit-link`, {
       method: 'POST',
       headers: { Cookie: readerCookie, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: 'https://example.com/quarantined-via-api', note: 'pending only' }),
+      body: JSON.stringify({ url: 'https://example.com/quarantined-via-api', note: 'pending only', role: 'admin', markdown: '不能借请求正文冒充管理员' }),
     });
     assert.equal(quarantinedSubmit.status, 202);
     const quarantined = await quarantinedSubmit.json();
