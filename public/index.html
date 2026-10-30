@@ -10,6 +10,13 @@
   <link rel="alternate" type="application/rss+xml" title="QMReader 公开资产 RSS" href="https://rss.qiaomu.ai/assets.xml" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="shortcut icon" href="/favicon.svg" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <meta name="theme-color" content="#111111" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="QMReader" />
+  <link rel="stylesheet" href="/discovery.css?v=1" />
+
   <link rel="stylesheet" href="/styles.css?v=20261027-admin-font1" />
   <meta name="description" content="精选中英文 RSS，AI 自动译成好读的中文，边读边问 AI 的阅读器。" />
   <link rel="canonical" href="https://rss.qiaomu.ai/" />
@@ -135,8 +142,6 @@
       <header class="pane-header">
         <div class="pane-title" id="list-title">全部</div>
         <div class="pane-actions">
-          <button id="source-refresh-btn" class="icon-btn source-refresh-btn hidden" type="button" title="检查当前信息源更新" aria-label="检查当前信息源更新"><span data-qm-icon="refresh-cw"></span></button>
-          <span id="source-refresh-status" class="source-refresh-status hidden" role="status" aria-live="polite"></span>
           <input id="search" type="search" placeholder="搜索文章…" aria-label="搜索文章" />
           <button id="mark-read-btn" class="icon-btn mark-read-labeled" title="把当前列表全部标为已读" aria-label="全部标为已读"><span data-qm-icon="check-check"></span><span class="button-label">全部已读</span></button>
         </div>
@@ -145,6 +150,12 @@
         <button class="list-scope-btn active" type="button" data-list-scope="latest">最新</button>
         <button class="list-scope-btn" type="button" data-list-scope="hot">热门</button>
         <button class="list-scope-btn" type="button" data-list-scope="unread">未读</button>
+      </div>
+      <div id="list-context-row" class="list-context-row">
+        <strong id="list-scope-title">全部</strong>
+        <span id="list-scope-count" class="list-scope-count"></span>
+          <button id="source-refresh-btn" class="icon-btn source-refresh-btn hidden" type="button" title="检查当前信息源更新" aria-label="检查当前信息源更新"><span data-qm-icon="refresh-cw"></span></button>
+          <span id="source-refresh-status" class="source-refresh-status hidden" role="status" aria-live="polite"></span>
       </div>
       <div id="entry-pane-tabs" class="entry-pane-tabs hidden" role="tablist" aria-label="全部视图">
         <button class="entry-pane-tab active" type="button" data-home-tab="entries">文章列表 <span id="home-entry-count">0</span></button>
@@ -844,6 +855,8 @@
   <script defer src="/provider-icons.js?v=1"></script>
   <script defer src="/ai-providers.js?v=20261028-aiset1"></script>
   <script defer src="/ai-settings.js?v=20261028-test1"></script>
+  <script defer src="/ranking.js?v=1"></script>
+  <script defer src="/pwa.js?v=1"></script>
   <script defer src="/app.js?v=article-first-20261028-4"></script>
   <script defer src="/podscribe.js?v=6"></script>
   <script defer src="/web-collection.js?v=1.0.0"></script>

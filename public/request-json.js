@@ -51,7 +51,9 @@
       } catch (error) {
         if (originalSignal?.aborted) throw Object.assign(Error('请求已取消'), { name: 'AbortError' });
         const transient = expired || error instanceof TypeError || [408, 502, 503, 504].includes(error.status);
-        if (!retryable || attempt || !transient || Date.now() >= deadline) throw error;
+        // Timer granularity can fire just before the wall-clock deadline. An
+        // expired private read has already used its one complete download budget.
+        if (!retryable || attempt || !transient || (expired && !eligible) || Date.now() >= deadline) throw error;
       } finally { clearTimeout(timer); originalSignal?.removeEventListener('abort', abort); }
     }
   }

@@ -302,17 +302,10 @@
   }, { passive: true });
 
   /* ---------- list meta: what you are looking at and how many ---------- */
-  const scopeBar = $('#list-scope-bar');
-  const listMeta = make('div', 'wb-list-meta');
-  listMeta.innerHTML = '<b></b><span></span>';
-  scopeBar?.insertAdjacentElement('afterend', listMeta);
+  const listMeta = $('#list-context-row');
+  listMeta?.classList.add('wb-list-meta');
   const syncListMeta = () => {
-    const title = ($('#list-title')?.textContent || '').trim();
-    const cards = $$('#entry-list .entry-card');
-    const unread = cards.filter(card => !card.classList.contains('read')).length;
-    $('b', listMeta).textContent = title;
-    $('span', listMeta).textContent = cards.length ? `${cards.length} 篇${unread ? ` · ${unread} 未读` : ''}` : '';
-    listMeta.classList.toggle('hidden', !title || !!$('#ps-entry-view:not(.hidden)'));
+    listMeta?.classList.toggle('hidden', !!$('#ps-entry-view:not(.hidden)') || state.view === 'contributors');
   };
 
   /* ---------- crumb: keeps the source in view while scrolling ---------- */

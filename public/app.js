@@ -1887,6 +1887,7 @@ async function loadEntries({ summary = state.view === 'assets' ? 'full' : state.
   }
   const p = new URLSearchParams();
   p.set('optIn', [...state.optInSources].join(','));
+  if (state.view === 'hot') p.set('sort', 'hot');
   if (state.filterSource) p.set('source', state.filterSource);
   if (state.filterCategory) p.set('category', state.filterCategory);
   if (state.q && state.view !== 'assets' && state.view !== 'contributors') p.set('q', state.q);
@@ -2029,37 +2030,7 @@ function entryTitlePenalty(entry) {
 }
 
 function entryQualityBreakdown(entry) {
-  const stats = entryStats(entry);
-  const assets = entry && entry.assets ? entry.assets : {};
-  const ageHours = Math.max(0, (Date.now() - (Number(entry && entry.publishedTs) || Date.now())) / 36e5);
-  const decay = Math.max(1, Math.log2(2 + ageHours / 12));
-  const signals = {
-    likes: (Number(stats.likeCount) || 0) * 4,
-    favorites: (Number(stats.favoriteCount) || 0) * 2.5,
-    helpful: (Number(assets.helpfulCount) || 0) * 3,
-    comments: (Number(assets.comments) || 0) * 2,
-    annotations: (Number(assets.annotations) || 0) * 1.6,
-    aiAssets: (assetCountForType(entry, 'translation') + assetCountForType(entry, 'rewrite')) * 1.4,
-    chat: (Number(assets.chatMessages) || 0) * 1.1,
-    reads: Math.min(8, (Number(stats.viewCount) || 0) / 8),
-  };
-  const penalties = {
-    dislikes: (Number(stats.dislikeCount) || 0) * 3,
-    title: entryTitlePenalty(entry),
-  };
-  const positive = Object.values(signals).reduce((sum, value) => sum + value, 0);
-  const negative = Object.values(penalties).reduce((sum, value) => sum + value, 0);
-  const raw = Math.max(0, positive - negative);
-  return {
-    score: raw / decay,
-    raw,
-    positive,
-    negative,
-    decay,
-    ageHours,
-    signals,
-    penalties,
-  };
+  return window.QMRanking.breakdown(entry);
 }
 
 function entryQualityScore(entry) {
@@ -2079,7 +2050,8 @@ function qScoreParts(entry) {
     q.signals.reads ? `阅读 +${q.signals.reads.toFixed(1)}` : '',
     q.penalties.dislikes ? `负反馈 -${q.penalties.dislikes.toFixed(1)}` : '',
     q.penalties.title ? `标题惩罚 -${q.penalties.title.toFixed(1)}` : '',
-    `时间衰减 ÷${q.decay.toFixed(2)}`,
+    q.signals.updates ? `近期内容 +${q.signals.updates.toFixed(1)}` : '',
+    '互动热度每 72 小时减半',
   ].filter(Boolean);
   return { ...q, parts };
 }
@@ -4181,6 +4153,9 @@ function renderList() {
   $('#app').classList.toggle('home-assets', isHomeScope() && state.homeTab === 'assets');
   renderListScopeBar();
   renderEntryPaneTabs();
+  const scopeEntries = visibleEntries();
+  $('#list-scope-count').textContent = `${scopeEntries.length} 篇 · ${scopeEntries.filter(entry => !state.read.has(entry.id)).length} 未读`;
+  $('#list-context-row').classList.toggle('hidden', state.view === 'contributors');
   $('#mark-read-btn').classList.toggle('hidden', state.view === 'contributors' || (isHomeScope() && state.homeTab === 'assets'));
   if (state.view === 'contributors') {
     renderContributorDirectory();
@@ -4354,6 +4329,7 @@ function updateListTitle() {
   else if (state.view === 'contributors') title = '贡献榜';
   if (state.q) title += ` · “${state.q}”`;
   $('#list-title').textContent = title;
+  if ($('#list-scope-title')) $('#list-scope-title').textContent = title;
   updateSearchPlaceholder();
   renderSourceRefreshButton();
 }
@@ -4375,12 +4351,18 @@ function renderSourceRefreshButton() {
       && state.refreshing
       && (!state.refreshProgress.sourceId || state.refreshProgress.sourceId === source.id)
   );
-  btn.classList.toggle('hidden', !source);
-  btn.classList.toggle('refreshing', sourceRefreshing);
-  btn.disabled = sourceRefreshing;
-  setElementIcon(btn, sourceRefreshing ? 'loader-circle' : 'refresh-cw', {
-    className: sourceRefreshing ? 'app-icon app-icon-spin' : 'app-icon',
+  btn.classList.toggle('hidden', state.view === 'contributors');
+  const busy = sourceRefreshing || Boolean(state.listRefreshBusy);
+  btn.classList.toggle('refreshing', busy);
+  btn.disabled = sourceRefreshing || Boolean(state.listRefreshBusy);
+  btn.setAttribute('aria-busy', String(btn.disabled));
+  setElementIcon(btn, busy ? 'loader-circle' : 'refresh-cw', {
+    className: busy ? 'app-icon app-icon-spin' : 'app-icon',
   });
+  if (!source) {
+    btn.title = state.listRefreshBusy ? '正在更新列表' : '刷新当前列表';
+    btn.setAttribute('aria-label', btn.title);
+  }
   if (source) {
     btn.title = `${sourceRefreshing ? '正在检查' : '检查'} ${source.name} 更新`;
     btn.setAttribute('aria-label', btn.title);
@@ -9098,12 +9080,15 @@ async function refreshAll() {
       setButtons(data.refreshing ? `${data.progress.done}/${data.progress.total}` : '刷新全部', Boolean(data.refreshing));
       if (!data.refreshing) break;
     }
+    if (state.refreshing) throw new Error('仍在后台更新，请稍后查看');
     await reload({ keepReader: true });
     if (!$('#manage-modal')?.classList.contains('hidden')) renderManage();
     if (state.workspacePage === 'admin') renderAdminPage();
     toast('刷新完成');
+    return true;
   } catch (e) {
     toast('刷新失败: ' + e.message);
+    return false;
   } finally {
     setButtons('刷新全部', false);
   }
@@ -9111,8 +9096,28 @@ async function refreshAll() {
 
 async function refreshCurrentSource() {
   const source = state.filterSource ? sourceById(state.filterSource) : null;
-  if (!source) return;
+  if (state.listRefreshBusy) return;
+  if (!source) {
+    state.listRefreshBusy = true;
+    renderSourceRefreshButton();
+    setSourceRefreshStatus('正在更新', 'loading');
+    try {
+      if (state.me?.role === 'admin') {
+        if (await refreshAll() === false) throw new Error('全源更新尚未完成');
+      }
+      else await reload({ keepReader: true });
+      setSourceRefreshStatus('列表已更新', 'success', { timeout: 5200 });
+    } catch (error) {
+      setSourceRefreshStatus('更新失败', 'error', { timeout: 5200 });
+      toast('刷新失败: ' + error.message);
+    } finally {
+      state.listRefreshBusy = false;
+      renderSourceRefreshButton();
+    }
+    return;
+  }
   if (!requireAuth('login')) return;
+  state.listRefreshBusy = true;
 
   const btn = $('#source-refresh-btn');
   btn.disabled = true;
@@ -9121,7 +9126,7 @@ async function refreshCurrentSource() {
   setSourceRefreshStatus('正在检查', 'loading');
   toast(`正在检查 ${source.name} 更新…`, 2600);
   try {
-    const beforeEntries = await sourceEntriesSnapshot(source.id).catch(() => []);
+    const beforeEntries = await sourceEntriesSnapshot(source.id);
     const result = await api('/api/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -9135,11 +9140,12 @@ async function refreshCurrentSource() {
       const data = await loadSources();
       if (!data.refreshing) break;
     }
+    if (state.refreshing) throw new Error('仍在后台更新，请稍后查看');
     const latestSource = sourceById(source.id);
     if (latestSource && latestSource.status === 'error') {
       throw new Error(latestSource.error || '信息源刷新失败');
     }
-    const afterEntries = await sourceEntriesSnapshot(source.id).catch(() => []);
+    const afterEntries = await sourceEntriesSnapshot(source.id);
     const added = newEntryCount(beforeEntries, afterEntries);
     await reload({ keepReader: true });
     const doneMessage = added ? `${source.name} 新增 ${added} 篇` : `${source.name} 暂无更新`;
@@ -9149,6 +9155,7 @@ async function refreshCurrentSource() {
     setSourceRefreshStatus('检查失败', 'error', { timeout: 5200 });
     toast('刷新失败: ' + e.message, 5000);
   } finally {
+    state.listRefreshBusy = false;
     renderSourceRefreshButton();
   }
 }
