@@ -2114,7 +2114,7 @@ app.get('/support', (_req, res) => {
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders(res, file) {
     if (file.endsWith('sw.js')) {
-      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Service-Worker-Allowed', '/');
     } else if (file.endsWith('.webmanifest')) {
       res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
