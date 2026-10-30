@@ -21,6 +21,8 @@
 
 需要 Node 22.22+（运行时使用 `node:sqlite`）和 Python 3。保留现有 Reader、DR 同步和 SafetyGate 配置。
 
+仓库内运行时默认以本目录的上一级作为应用目录，兼容 Docker 的 `/app` 和本地检出路径。独立安装到其他目录时，使用 `RSS_APP_DIR` 指定 Reader 根目录；`QMREADER_DATA_DIR` 仍可覆盖抓取事件的数据目录。
+
 1. 将本目录安装到主机 `/opt/qiaomu-apps/qiaomu-rss-reliability`，运行：
 
    ```sh

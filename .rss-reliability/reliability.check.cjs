@@ -9,6 +9,28 @@ const { watch } = require('./watchdog.cjs');
 const { validate } = require('./remote-result.cjs');
 const { evaluate } = require('./health.cjs');
 const { requestJson } = require('./request-json.js');
+test('source children load the installed application path and respect an explicit override', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rss-relocated-'));
+  try {
+    const reliability = path.join(root, '.rss-reliability');
+    fs.mkdirSync(reliability);
+    const child = path.join(reliability, 'source-child.cjs');
+    fs.copyFileSync(path.join(__dirname, 'source-child.cjs'), child);
+    const env = { ...process.env };
+    delete env.RSS_APP_DIR;
+    for (const [directory, marker] of [[root, 'installed'], [path.join(root, 'override'), 'override']]) {
+      fs.mkdirSync(path.join(directory, 'lib'), { recursive: true });
+      fs.writeFileSync(path.join(directory, 'lib/fetcher.js'), `module.exports = {
+        loadDisk() {}, flushDisk() {},
+        async fetchSource(source) { return { status: 'ok', sourceId: source.id, marker: '${marker}' }; }
+      };`);
+      if (marker === 'override') env.RSS_APP_DIR = directory;
+      const result = await isolated(child, { source: { id: 'feed' } }, { env, timeout: 3000 });
+      assert.equal(result.status, 'ok');
+      assert.equal(result.marker, marker);
+    }
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 test('a transport ignoring cancellation is killed; the next source still finishes', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rss-timeout-'));
   try {

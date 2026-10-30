@@ -7,7 +7,7 @@ function record(sourceId, kind) {
   const event = { at: Date.now(), sourceId, kind }; events.push(event); if (events.length > 100) events.shift();
   console.log('[rss-fetch]', JSON.stringify(event));
   try {
-    const directory = process.env.QMREADER_DATA_DIR || path.join(process.env.RSS_APP_DIR || '/opt/qiaomu-apps/qmreader', 'data');
+    const directory = process.env.QMREADER_DATA_DIR || path.join(process.env.RSS_APP_DIR || path.resolve(__dirname, '..'), 'data');
     fs.mkdirSync(path.join(directory, 'fetch-events'), { recursive: true });
     fs.writeFileSync(path.join(directory, 'fetch-events', sourceId + '.json'), JSON.stringify(event));
   } catch { /* The independent health check also catches missing observations. */ }

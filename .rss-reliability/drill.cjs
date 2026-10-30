@@ -8,9 +8,10 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rss-failover-drill-'));
 process.env.QMREADER_DATA_DIR = directory;
 process.env.QMREADER_DB_FILE = path.join(directory, 'drill.sqlite');
 process.env.RSS_SOURCE_TIMEOUT_MS = '1';
-const fetcher = require(path.join(process.env.RSS_APP_DIR || '/opt/qiaomu-apps/qmreader', 'lib/fetcher.js'));
+const appDirectory = process.env.RSS_APP_DIR || path.resolve(__dirname, '..');
+const fetcher = require(path.join(appDirectory, 'lib/fetcher.js'));
 require('./bounded-fetch.cjs').install(fetcher);
-const store = require(path.join(process.env.RSS_APP_DIR || '/opt/qiaomu-apps/qmreader', 'lib/store.js'));
+const store = require(path.join(appDirectory, 'lib/store.js'));
 (async () => {
   const source = fetcher.getSourceById('qiaomu-blog');
   const result = await fetcher.fetchSource(source);
