@@ -32,6 +32,65 @@ function openAiResponse(content, finishReason = 'stop', headers = {}) {
   }), { status: 200, headers: { 'content-type': 'application/json', ...headers } });
 }
 
+test('real Chinese translation HTML is preserved across inline tags and list boundaries', () => {
+  const examples = [
+    ['阅读器在你的设备上存储 12 条笔记。它不会上传原书。', '<p>阅读器在你的设备上存储 <strong>12 条笔记</strong>。它不会上传原书。</p>'],
+    ['设置 sync_interval=30 以每 30 分钟同步一次。请参阅设置指南。', '<p>设置 <code>sync_interval=30</code> 以每 30 分钟同步一次。请参阅<a href="https://example.com/guide">设置指南</a>。</p>'],
+    ['无需网络连接即可阅读。将批注导出为 Markdown。', '<ul><li>无需网络连接即可阅读。</li><li>将批注导出为 Markdown。</li></ul>'],
+  ];
+  for (const [target, html] of examples) {
+    assert.equal(deepseek.__test.translationHtmlMatchesTarget(target, html), true);
+  }
+  assert.equal(deepseek.__test.translationHtmlMatchesTarget('阅读器不会上传原书。', '<p>阅读器会上传原书。</p>'), false);
+});
+
+test('official Flash translation and rewrite disable thinking without consuming answer budget', async t => {
+  let sent;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    sent = JSON.parse(options.body);
+    return openAiResponse('翻译成功');
+  });
+  const config = providerConfig({provider:'deepseek', baseUrl:'https://api.deepseek.com', model:'deepseek-flash'});
+  await deepseek.__test.postChatCompletion(config, {messages:[{role:'user',content:'Translate'}], max_tokens:800});
+  assert.deepEqual(sent.thinking, {type:'disabled'});
+  assert.equal(sent.reasoning_effort, undefined);
+  assert.equal(sent.max_tokens, 800);
+  assert.equal(sent.temperature, 0.1);
+  await deepseek.__test.postChatCompletion(config, {messages:[{role:'user',content:'Rewrite'}], max_tokens:9000});
+  assert.equal(sent.max_tokens, 9000);
+});
+
+test('custom provider completions keep their original token and reasoning options', async t => {
+  let sent;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    sent = JSON.parse(options.body);
+    return openAiResponse('OK');
+  });
+  await deepseek.__test.postChatCompletion(providerConfig(), {messages:[{role:'user',content:'Translate'}], max_tokens:800});
+  assert.equal(sent.max_tokens, 800);
+  assert.equal(sent.thinking, undefined);
+  assert.equal(sent.reasoning_effort, undefined);
+});
+
+test('default website requests reserve the full bounded Flash rewrite allowance', () => {
+  const { requestAiConfig } = require('../lib/request-ai-config');
+  const config = deepseek.getConfig(requestAiConfig({get: () => ''}));
+  assert.equal(config.maxTokens, 7000);
+  const custom = deepseek.getConfig({provider:'openai-compatible', baseUrl:'https://example.com/v1', model:'test-model'});
+  assert.equal(custom.maxTokens, 2000);
+});
+
+test('server-funded completion refuses a body model override before network access', async t => {
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => { calls++; return openAiResponse('OK'); });
+  await assert.rejects(() => deepseek.__test.postChatCompletion(providerConfig({
+    provider: 'deepseek', usesServerDeepSeekKey: true,
+    baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-flash',
+  }), { model: 'deepseek-v4-pro', messages: [{ role: 'user', content: 'hello' }] }),
+  error => error.code === 'AI_MODEL_FORBIDDEN');
+  assert.equal(calls, 0);
+});
+
 test('structured translation extracts and chunks every paragraph without the old 28-block cap', () => {
   const html = Array.from({ length: 35 }, (_, index) => `<p>Paragraph ${index} contains enough English text to translate completely.</p>`).join('');
   const blocks = deepseek.__test.htmlToTranslationBlocks(html, '');
@@ -45,9 +104,13 @@ test('short headings remain part of translation coverage', () => {
   assert.deepEqual(blocks.map(block => block.source), ['Results', 'A normal paragraph with enough text.']);
 });
 
-test('a single oversized structure block fails before calling the model', () => {
-  const blocks = deepseek.__test.htmlToTranslationBlocks(`<p>${'Long sentence. '.repeat(1200)}</p>`, '');
-  assert.throws(() => deepseek.__test.chunkTranslationBlocks(blocks), /过长的单个结构块/);
+test('oversized paragraphs split without dropping text or exceeding the chunk budget', () => {
+  const text = 'Long sentence. '.repeat(1200);
+  const blocks = deepseek.__test.htmlToTranslationBlocks(`<p>${text}</p>`, '');
+  assert.ok(blocks.length > 1);
+  assert.equal(blocks.map(block => block.source).join('').replace(/\s/g, ''), text.replace(/\s/g, ''));
+  const chunks = deepseek.__test.chunkTranslationBlocks(blocks);
+  assert.equal(chunks.flat().length, blocks.length);
 });
 
 test('preformatted blocks keep newlines and closing tags intact', () => {
@@ -217,15 +280,15 @@ test('server-owned DeepSeek credentials ignore caller base URLs and force the of
   };
   process.env.DEEPSEEK_API_KEY = 'server-owned-test-key';
   process.env.DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
-  process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+  process.env.DEEPSEEK_MODEL = 'deepseek-flash';
   try {
     const config = deepseek.getConfig({
       provider: 'deepseek',
       baseUrl: 'https://attacker.example/v1',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
     });
     assert.equal(config.baseUrl, 'https://api.deepseek.com/v1');
-    assert.equal(config.model, 'deepseek-v4-flash');
+    assert.equal(config.model, 'deepseek-flash');
     assert.equal(config.usesServerDeepSeekKey, true);
   } finally {
     if (previous.key === undefined) delete process.env.DEEPSEEK_API_KEY;
@@ -237,6 +300,18 @@ test('server-owned DeepSeek credentials ignore caller base URLs and force the of
   }
 });
 
+test('old Flash settings normalize to the current API alias', () => {
+  const previous = process.env.DEEPSEEK_MODEL;
+  process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+  try {
+    const config = deepseek.getConfig({provider: 'deepseek', model: 'deepseek-v4-flash'});
+    assert.equal(config.model, 'deepseek-flash');
+  } finally {
+    if (previous === undefined) delete process.env.DEEPSEEK_MODEL;
+    else process.env.DEEPSEEK_MODEL = previous;
+  }
+});
+
 test('server-owned DeepSeek credentials reject Pro and legacy model overrides', () => {
   const previous = {
     key: process.env.DEEPSEEK_API_KEY,
@@ -245,12 +320,12 @@ test('server-owned DeepSeek credentials reject Pro and legacy model overrides', 
   };
   process.env.DEEPSEEK_API_KEY = 'server-owned-test-key';
   process.env.DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
-  process.env.DEEPSEEK_MODEL = 'deepseek-v4-flash';
+  process.env.DEEPSEEK_MODEL = 'deepseek-flash';
   try {
     for (const model of ['deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner']) {
       assert.throws(
         () => deepseek.getConfig({ provider: 'deepseek', model }),
-        /只允许使用 deepseek-v4-flash/
+        /只允许使用 deepseek-flash/
       );
     }
   } finally {
@@ -276,7 +351,7 @@ test('BYOK custom providers keep their caller-owned routing', () => {
   assert.equal(config.usesServerDeepSeekKey, false);
 });
 
-test('BYOK DeepSeek is also restricted to the official endpoint and V4 Flash', () => {
+test('BYOK DeepSeek is also restricted to the official endpoint and Flash', () => {
   assert.throws(
     () => deepseek.getConfig({
       apiKey: 'caller-owned-test-key',
@@ -284,24 +359,24 @@ test('BYOK DeepSeek is also restricted to the official endpoint and V4 Flash', (
       baseUrl: 'https://api.deepseek.com/v1',
       model: 'deepseek-v4-pro',
     }),
-    /只允许使用 deepseek-v4-flash/
+    /只允许使用 deepseek-flash/
   );
   assert.throws(
     () => deepseek.getConfig({
       apiKey: 'caller-owned-test-key',
       provider: 'deepseek',
       baseUrl: 'https://gateway.example/v1',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
     }),
     /只能请求 https:\/\/api\.deepseek\.com/
   );
 });
 
-test('DeepSeek model discovery exposes V4 Flash only', async () => {
+test('DeepSeek model discovery exposes Flash only', async () => {
   const originalFetch = global.fetch;
   global.fetch = async () => new Response(JSON.stringify({
     data: [
-      { id: 'deepseek-v4-flash' },
+      { id: 'deepseek-flash' },
       { id: 'deepseek-v4-pro' },
       { id: 'deepseek-chat' },
     ],
@@ -311,9 +386,9 @@ test('DeepSeek model discovery exposes V4 Flash only', async () => {
       apiKey: 'caller-owned-test-key',
       provider: 'deepseek',
       baseUrl: 'https://api.deepseek.com/v1',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
     });
-    assert.deepEqual(result.models, ['deepseek-v4-flash']);
+    assert.deepEqual(result.models, ['deepseek-flash']);
   } finally {
     global.fetch = originalFetch;
   }

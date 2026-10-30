@@ -1,6 +1,6 @@
 {
   "name": "qmreader",
-  "version": "1.0.0",
+  "version": "1.0.15",
   "description": "Neutral online RSS reader powered by RSSHub and direct feeds",
   "license": "MIT",
   "homepage": "https://rss.qiaomu.ai",
@@ -22,12 +22,13 @@
     "dev": "node server.js",
     "test": "node --test test/*.test.js",
     "icons:generate": "node scripts/generate-lucide-icons.js",
-    "refresh:worker": "node scripts/refresh-worker.js --kind=refresh"
+    "refresh:worker": "node scripts/refresh-worker.js --kind=refresh",
+    "package": "node scripts/package-release.cjs"
   },
   "dependencies": {
     "cheerio": "^1.2.0",
     "compression": "^1.8.1",
-    "dompurify": "3.4.14",
+    "dompurify": "3.4.17",
     "express": "^4.19.2",
     "iconv-lite": "^0.6.3",
     "rss-parser": "^3.13.0",
@@ -35,5 +36,8 @@
   },
   "devDependencies": {
     "lucide": "^1.22.0"
+  },
+  "engines": {
+    "node": ">=22.22.0"
   }
 }

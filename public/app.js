@@ -23,7 +23,9 @@ function readStoredNumber(key) {
   return Number.isFinite(n) ? n : 0;
 }
 
-const CATEGORY_LABELS = { article: '文章', news: '资讯', podcast: '播客' };
+const CATEGORY_LABELS = { article: '文章', news: '资讯', podcast: '播客', community: '社区' };
+const storedWechatSources = readJson('qm_wechat_sources', '[]');
+const storedPodcastSources = readJson('qm_podcast_sources', '[]');
 const READER_TABS = ['original', 'rewrite', 'translation'];
 const READER_NAV_TABS = ['original', 'rewrite'];
 const DEFAULT_READER_OPEN_TAB = 'rewrite';
@@ -55,22 +57,30 @@ const COMMENT_TEMPLATE_LABELS = {
   source: '资料',
 };
 const COMMENT_SORTS = ['helpful', 'latest'];
-const DEFAULT_REWRITE_MODEL = 'deepseek-v4-flash';
+const DEFAULT_REWRITE_MODEL = 'deepseek-flash';
 const READER_PREF_DEFAULTS = {
-  fontSize: 16.5,
-  lineHeight: 1.88,
+  fontSize: 17,
+  lineHeight: 1.9,
   measure: 70,
   font: 'default',
 };
 const READER_FONTS = {
-  default: '默认混排',
-  pingfang: '苹方黑体',
-  song: '宋体',
-  kai: '楷体',
-  serif: '衬线',
-  mono: '等宽',
-  hei: '系统黑体',
+  default: '系统默认',
+  sans: '思源黑体',
+  serif: '思源宋体',
+  kai: '霞鹜文楷',
 };
+// Older saved choices map onto the four fonts that remain.
+const READER_FONT_ALIASES = { pingfang: 'default', hei: 'default', mono: 'default', song: 'serif' };
+// Web fonts load only when chosen (same mirrors as lex.qiaomu.ai, reachable from mainland China).
+const READER_FONT_STYLESHEETS = {
+  sans: 'https://fonts.googleapis.cn/css2?family=Noto+Sans+SC:wght@400;600&display=swap',
+  serif: 'https://fonts.googleapis.cn/css2?family=Noto+Serif+SC:wght@400;600&display=swap',
+  kai: 'https://cdn.jsdelivr.net/npm/lxgw-wenkai-screen-webfont@1.7.0/lxgwwenkaiscreen.css',
+};
+const READER_LINE_HEIGHTS = [1.7, 1.9, 2.1];
+const READER_MEASURES = [60, 70, 80];
+const READER_PAPERS = ['light', 'sepia', 'dark'];
 const AI_READING_TASKS = [
   {
     group: '理解',
@@ -121,7 +131,8 @@ const DEFAULT_AGENT_PROMPTS = AI_READING_TASKS
 const AGENT_PROMPT_LIMIT = 24;
 const PERSONA_AGENT_VERSION = 'persona-qmreader-v1';
 const ENTRY_RENDER_BATCH_SIZE = 100;
-const ENTRY_LIST_PAGE_SIZE = 60;
+// UI-MOBILE: first page is 40 rows (~17KB gzipped vs ~24KB at 60); more load as the list sentinel scrolls into view.
+const ENTRY_LIST_PAGE_SIZE = 40;
 const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const LUCIDE_DEFAULT_ATTRS = {
   xmlns: 'http://www.w3.org/2000/svg',
@@ -318,6 +329,13 @@ const AI_PROVIDER_PRESETS = [
     description: 'Cloudflare 官方 Workers AI，Base URL 里的 <ACCOUNT_ID> 需替换为你的账号 ID。',
   },
 ];
+// Extra platforms, account sign-in and key detection live in /ai-providers.js.
+if (window.QMAiProviders) {
+  const known = new Set(AI_PROVIDER_PRESETS.map(preset => preset.id));
+  for (const preset of QMAiProviders.presets) if (!known.has(preset.id)) AI_PROVIDER_PRESETS.push(preset);
+  for (const preset of AI_PROVIDER_PRESETS) if (QMAiProviders.signInForExisting[preset.id]) preset.signIn = QMAiProviders.signInForExisting[preset.id];
+  AI_PROVIDER_CATEGORIES.unshift(QMAiProviders.ACCOUNT);
+}
 const AI_PROVIDER_MAP = Object.fromEntries(AI_PROVIDER_PRESETS.map(preset => [preset.id, preset]));
 const DEFAULT_AI_PRESET_ID = 'deepseek';
 
@@ -416,9 +434,15 @@ function normalizeReaderOpenTab(tab) {
 }
 
 function setCurrentUser(user, { resetProfileDraft = true } = {}) {
+  if (state.authReady && state.me?.id !== user?.id) entryPrefetches.clear();
+  state.authRevision = (state.authRevision || 0) + 1;
+  state.authReady = true;
+  state.authRestoreFailed = false;
   state.me = user || null;
   state.defaultReaderTab = normalizeDefaultReaderTab(state.me && state.me.defaultReaderTab);
   if (resetProfileDraft) state.profileDefaultReaderTabDraft = state.defaultReaderTab;
+  const podcastNotesLink = $('#reader-podcast-notes');
+  if (podcastNotesLink && !state.me) podcastNotesLink.classList.add('hidden');
 }
 
 function activeSourceForEntry(entry = state.activeEntry) {
@@ -454,7 +478,7 @@ function rewriteUiCopy(entry = state.activeEntry) {
     };
   }
   return {
-    tab: '中文改写',
+    tab: '中文',
     section: '中文改写',
     asset: '中文改写',
     action: '生成',
@@ -481,8 +505,6 @@ function updateRewriteUiLabels(entry = state.activeEntry) {
   if (tab) tab.textContent = copy.tab;
   const section = $('#rewrite-section-label');
   if (section) section.textContent = copy.section;
-  const emptyText = $('#rewrite-empty p');
-  if (emptyText) emptyText.textContent = copy.empty;
   const copyBtn = $('#rewrite-copy');
   if (copyBtn) {
     copyBtn.title = copy.copyTitle;
@@ -537,6 +559,7 @@ function createProfileFromPreset(presetId = DEFAULT_AI_PRESET_ID, overrides = {}
     temperature: 0.7,
     maxTokens: 2000,
     apiKey: '',
+    oauthAccountId: '',
     isDefault: false,
     createdAt: now,
     updatedAt: now,
@@ -583,6 +606,8 @@ function normalizeProfile(raw, index = 0) {
     temperature: clampTemperature(raw && raw.temperature),
     maxTokens: clampMaxTokens(raw && (raw.maxTokens || raw.max_tokens)),
     apiKey: String(raw && (raw.apiKey || raw.api_key) || '').trim(),
+    oauthAccountId: String(raw && raw.oauthAccountId || '').trim(),
+    providerId: String(raw && raw.providerId || '').trim(),
     isDefault: hasDefaultFlag ? Boolean(raw.isDefault || raw.is_default) : index === 0,
     createdAt: Number(raw && raw.createdAt) || Date.now(),
     updatedAt: Number(raw && raw.updatedAt) || Date.now(),
@@ -611,6 +636,10 @@ function historyEntriesForStorage(map) {
 const state = {
   sources: [],
   adminSources: [],
+  optInSources: new Set([
+    ...(Array.isArray(storedWechatSources) ? storedWechatSources.filter(id => typeof id === 'string' && id.startsWith('wechat-')) : []),
+    ...(Array.isArray(storedPodcastSources) ? storedPodcastSources.filter(id => typeof id === 'string' && id.startsWith('podscribe-')) : []),
+  ]),
   entries: [],
   entryRenderLimit: ENTRY_RENDER_BATCH_SIZE,
   entryListScope: '',
@@ -683,6 +712,7 @@ const state = {
   rewriteGenerating: false,
   pendingRewriteGenerate: false,
   readerTab: 'original',
+  originalRevealed: false,
   defaultReaderTab: DEFAULT_READER_OPEN_TAB,
   profileDefaultReaderTabDraft: DEFAULT_READER_OPEN_TAB,
   readerPrefs: normalizeReaderPrefs(readJson('qm_reader_prefs', JSON.stringify(READER_PREF_DEFAULTS))),
@@ -705,7 +735,7 @@ const state = {
   personaAgentEntryId: '',
   personaAgentMessageKey: '',
   personaAgentReady: false,
-  agentCollapsed: storage.getItem('qm_agent_collapsed') === '1',
+  agentCollapsed: storage.getItem('qm_agent_open') !== '1', // AI companion opens on demand; the old qm_agent_collapsed key is ignored
   agentAutoCollapsed: false,
   sidebarCollapsed: storage.getItem('qm_sidebar_collapsed') === '1',
   leftCollapsed: storage.getItem('qm_left_collapsed') === '1',
@@ -713,6 +743,7 @@ const state = {
   entryPaneWidth: readStoredNumber('qm_entry_pane_width'),
   contextPaneWidth: readStoredNumber('qm_context_pane_width'),
   me: null,
+  authReady: false,
   authMode: 'login',
   registrationEnabled: true,
   aiProfiles: [],
@@ -738,6 +769,7 @@ function routeStateFromUrl() {
   const contributorMatch = window.location.pathname.match(/^\/contributors\/([^/?#]+)\/?$/);
   const dashboardPath = /^\/(?:me|dashboard)\/?$/.test(window.location.pathname);
   const adminPath = /^\/admin\/?$/.test(window.location.pathname);
+  const podscribePath = /^\/podscribe\/?$/.test(window.location.pathname);
   const articleRoute = articleRouteFromPath(window.location.pathname);
   const pathAssetFilter = pathMatch ? (ASSET_FILTER_TYPES.includes(pathMatch[1]) ? pathMatch[1] : null) : null;
   const isAssetPath = Boolean(pathMatch);
@@ -770,6 +802,7 @@ function routeStateFromUrl() {
     entryId: articleRoute && articleRoute.id ? articleRoute.id : String(params.get('entry') || '').trim(),
     dashboard: dashboardPath,
     admin: adminPath,
+    podscribe: podscribePath,
     dashboardTab: dashboardPath ? normalizeDashboardTab(params.get('tab')) : 'profile',
     contributorId: contributorMatch ? decodeURIComponent(contributorMatch[1]).trim() : '',
     contributorAssetType: contributorMatch ? normalizeUserAssetTab(params.get('type')) : 'translation',
@@ -1062,7 +1095,8 @@ function adminUrlFor() {
 }
 
 function setWorkspacePage(page = '') {
-  const next = page === 'dashboard' || page === 'contributor' || page === 'admin' ? page : '';
+  const next = ['dashboard', 'contributor', 'admin'].includes(page) ? page : '';
+  if (next) setPodcastMode(false);
   state.workspacePage = next;
   const app = $('#app');
   app.classList.toggle('workspace-page-open', Boolean(next));
@@ -1079,6 +1113,22 @@ function setWorkspacePage(page = '') {
   $('#reader').classList.toggle('hidden', !state.activeEntry);
   $('#reader-empty').classList.toggle('hidden', Boolean(state.activeEntry));
   app.classList.toggle('reading', Boolean(state.activeEntry));
+}
+
+function setPodcastMode(active) {
+  const app = $('#app');
+  if (active) {
+    state.activeEntry = null;
+    setWorkspacePage('');
+    app.classList.remove('reading');
+  }
+  app.classList.toggle('podscribe-mode', active);
+  if (!active) app.classList.remove('ps-reading');
+  $('#ps-show-list')?.classList.toggle('hidden', !active);
+  $('#ps-entry-view')?.classList.toggle('hidden', !active);
+  $('#ps-reader-view')?.classList.toggle('hidden', !active);
+  $('#podscribe-nav')?.classList.toggle('active', active);
+  $$('.view-btn[data-view]').forEach(button => button.classList.toggle('active', !active && button.dataset.view === state.view && !state.filterSource && !state.filterCategory));
 }
 
 function syncReaderUrl({ replace = false, commentId = '', annotationId = '', chatMessageId = '' } = {}) {
@@ -1267,6 +1317,62 @@ function renderInlineMarkdown(value) {
     .replace(/`([^`]+)`/g, '<code>$1</code>');
 }
 
+function markdownTableCells(value) {
+  let row = String(value || '').trim();
+  if (!row.includes('|')) return null;
+  if (row.startsWith('|')) row = row.slice(1);
+  if (row.endsWith('|') && !row.endsWith('\\|')) row = row.slice(0, -1);
+
+  const cells = [];
+  let cell = '';
+  for (let index = 0; index < row.length; index += 1) {
+    const char = row[index];
+    if (char === '\\' && row[index + 1] === '|') {
+      cell += '|';
+      index += 1;
+      continue;
+    }
+    if (char === '|') {
+      cells.push(cell.trim());
+      cell = '';
+      continue;
+    }
+    cell += char;
+  }
+  cells.push(cell.trim());
+  return cells.length >= 2 ? cells : null;
+}
+
+function markdownTableDivider(cells) {
+  return Boolean(cells && cells.length >= 2 && cells.every(cell => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, ''))));
+}
+
+function markdownTableAlignment(value) {
+  const divider = String(value || '').replace(/\s+/g, '');
+  if (divider.startsWith(':') && divider.endsWith(':')) return 'center';
+  if (divider.endsWith(':')) return 'right';
+  if (divider.startsWith(':')) return 'left';
+  return '';
+}
+
+function renderMarkdownTable(headers, dividers, rows) {
+  const alignments = dividers.map(markdownTableAlignment);
+  const renderCell = (tag, value, index) => {
+    const alignment = alignments[index];
+    const className = alignment ? ` class="md-align-${alignment}"` : '';
+    return `<${tag}${className}>${renderInlineMarkdown(value)}</${tag}>`;
+  };
+  const normalizedRows = rows.map(row => headers.map((_, index) => row[index] || ''));
+  return [
+    '<div class="markdown-table-wrap">',
+    '<table>',
+    `<thead><tr>${headers.map((cell, index) => renderCell('th', cell, index)).join('')}</tr></thead>`,
+    `<tbody>${normalizedRows.map(row => `<tr>${row.map((cell, index) => renderCell('td', cell, index)).join('')}</tr>`).join('')}</tbody>`,
+    '</table>',
+    '</div>',
+  ].join('');
+}
+
 function renderMarkdownLite(value) {
   const escaped = escapeHtml(value).replace(/\r\n/g, '\n').replace(/\n\s*-{3,}\s*\n/g, '\n\n');
   const output = [];
@@ -1290,12 +1396,36 @@ function renderMarkdownLite(value) {
     list = null;
   };
 
-  for (const line of escaped.split('\n')) {
+  const lines = escaped.split('\n');
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
     const trimmed = line.trim();
     if (!trimmed) {
       flushParagraph();
       flushQuote();
       flushList();
+      continue;
+    }
+
+    const headerCells = markdownTableCells(trimmed);
+    const dividerCells = markdownTableCells(lines[lineIndex + 1]);
+    if (headerCells
+      && dividerCells
+      && headerCells.length === dividerCells.length
+      && markdownTableDivider(dividerCells)) {
+      flushParagraph();
+      flushQuote();
+      flushList();
+      const rows = [];
+      let nextIndex = lineIndex + 2;
+      for (; nextIndex < lines.length; nextIndex += 1) {
+        if (!lines[nextIndex].trim()) break;
+        const cells = markdownTableCells(lines[nextIndex]);
+        if (!cells) break;
+        rows.push(cells);
+      }
+      output.push(renderMarkdownTable(headerCells, dividerCells, rows));
+      lineIndex = nextIndex - 1;
       continue;
     }
 
@@ -1375,6 +1505,10 @@ function fallbackFavicon(img, letter) {
   img.replaceWith(icon);
 }
 
+function validateFavicon(img, letter) {
+  if (img.naturalWidth <= 1 || img.naturalHeight <= 1) fallbackFavicon(img, letter);
+}
+
 function faviconTargetUrl(siteUrl, domain) {
   const raw = String(siteUrl || '').trim();
   try {
@@ -1393,6 +1527,7 @@ function faviconHtml(siteUrl, name, size = 17) {
   if (!d) return `<span class="letter-icon" style="--icon-size:${safeSize}px">${escapeHtml(letter)}</span>`;
   const src = `/favicons?domain_url=${encodeURIComponent(faviconTargetUrl(siteUrl, d))}&sz=${Math.max(32, safeSize * 4)}`;
   return `<img class="favicon" style="--icon-size:${safeSize}px" src="${escapeHtml(src)}" loading="lazy" referrerpolicy="no-referrer"
+    onload="validateFavicon(this, '${escapeJsString(letter)}')"
     onerror="fallbackFavicon(this, '${escapeJsString(letter)}')" />`;
 }
 
@@ -1414,6 +1549,17 @@ function timeAgo(ts) {
   const d = Math.floor(h / 24);
   if (d < 30) return `${d} 天前`;
   return new Date(ts).toLocaleDateString('zh-CN');
+}
+
+function podcastRelativeDateLabel(value) {
+  const raw = String(value || '').trim();
+  if (/^today$/i.test(raw)) return '今天';
+  if (/^yesterday$/i.test(raw)) return '昨天';
+  const match = /^(over|almost|about)?\s*(\d+)\s*(day|week|month|year)s? ago$/i.exec(raw);
+  if (!match) return raw;
+  const unit = { day: '天', week: '周', month: '个月', year: '年' }[match[3].toLowerCase()];
+  const prefix = match[1]?.toLowerCase() === 'almost' ? '近 ' : match[1]?.toLowerCase() === 'about' ? '约 ' : '';
+  return `${prefix}${match[2]} ${unit}${match[1]?.toLowerCase() === 'over' ? '多' : ''}前`;
 }
 
 function shanghaiParts(ts = Date.now()) {
@@ -1512,7 +1658,7 @@ function loadAiProfilesForScope() {
   const stored = readJson(aiProfilesKey(scope), 'null');
   let profiles = Array.isArray(stored) ? stored.map(normalizeProfile) : migrateLegacyAiProfiles();
   if (!profiles.length) profiles = [createProfileFromPreset(DEFAULT_AI_PRESET_ID, { isDefault: true })];
-  profiles = ensureSingleDefault(profiles);
+  profiles = ensureSingleDefault(window.QMAiSettings ? QMAiSettings.migrate(profiles) : profiles);
   state.aiProfiles = profiles;
   const activeId = storage.getItem(aiActiveProfileKey(scope));
   state.activeAiProfileId = profiles.some(profile => profile.id === activeId)
@@ -1531,6 +1677,7 @@ function loadAiProfilesForScope() {
 
 function persistAiProfiles() {
   const scope = aiScope();
+  if (window.QMAiSettings) QMAiSettings.persistProviders();
   storage.setItem(aiProfilesKey(scope), JSON.stringify(ensureSingleDefault(state.aiProfiles)));
   if (state.activeAiProfileId) storage.setItem(aiActiveProfileKey(scope), state.activeAiProfileId);
   if (state.translationAiProfileId) storage.setItem(aiPurposeProfileKey('translation', scope), state.translationAiProfileId);
@@ -1564,6 +1711,7 @@ function configFromProfile(profile) {
     providerName: profile.providerName || profile.name || profile.provider || 'AI',
     providerType: profile.providerType || 'openai_compatible',
     apiKey: String(profile.apiKey || '').trim(),
+    oauthAccountId: String(profile.oauthAccountId || '').trim(),
     baseUrl: normalizeBaseUrl(profile.baseUrl),
     model: String(profile.model || '').trim(),
     temperature: clampTemperature(profile.temperature),
@@ -1580,7 +1728,7 @@ function aiConfigForPurpose(purpose = '') {
 }
 
 function hasUsableAiConfig(config = currentAiConfig()) {
-  return Boolean(config.apiKey && config.baseUrl && config.model);
+  return Boolean((config.apiKey || config.oauthAccountId) && config.baseUrl && config.model);
 }
 
 function aiHeaderValue(value, fallback = '') {
@@ -1592,6 +1740,16 @@ function aiHeaderValue(value, fallback = '') {
 }
 
 function aiHeadersFromConfig(config) {
+  if (!String(config.apiKey || '').trim() && config.oauthAccountId) {
+    // Account sign-in: only the account id travels; tokens and endpoint stay on the server.
+    return {
+      'X-AI-Provider': aiHeaderValue(config.provider, 'custom'),
+      'X-AI-OAuth-Account': aiHeaderValue(config.oauthAccountId),
+      'X-AI-Model': aiHeaderValue(config.model),
+      'X-AI-Temperature': String(config.temperature ?? ''),
+      'X-AI-Max-Tokens': String(config.maxTokens ?? ''),
+    };
+  }
   if (!String(config.apiKey || '').trim()) return {};
   return {
     'X-AI-Provider': aiHeaderValue(config.provider, 'custom'),
@@ -1642,23 +1800,19 @@ function rewriteAiConfig() {
 }
 
 async function api(path, opts) {
+  if (opts?.method && opts.method.toUpperCase() !== 'GET') {
+    const changed = path.match(/^\/api\/entry\/([^/?]+)(?:\/(?:rewrite|content))?(?:\?|$)/);
+    if (changed) entryPrefetches.delete(changed[1]);
+  }
   const headers = { ...(opts && opts.headers ? opts.headers : {}) };
   if (opts && opts.aiConfig) Object.assign(headers, aiHeadersFromConfig(opts.aiConfig));
   else if (opts && opts.ai) Object.assign(headers, aiHeaders());
   const rest = { ...(opts || {}) };
   delete rest.ai;
   delete rest.aiConfig;
-  const res = await fetch(path, { ...rest, headers });
-  if (!res.ok) {
-    let message = `${res.status}`;
-    try {
-      const data = await res.json();
-      if (data && data.error) message = data.error;
-    } catch { /* keep HTTP status */ }
-    throw new Error(message);
-  }
-  return res.json();
+  return window.qmRequestJson(path, { ...rest, headers, publicRead: !state.me && !opts?.ai && !opts?.aiConfig });
 }
+
 async function loadSources() {
   const data = await api('/api/sources');
   state.sources = data.sources;
@@ -1725,16 +1879,17 @@ const ENTRY_LIST_FIXED_VIEWS = ['history', 'starred', 'assets'];
 let entriesRequestSeq = 0;
 let entriesAbortController = null;
 let listReloadSeq = 0;
+const listScrollPositions = new Map();
 
 function entryListWindowed() {
   return !ENTRY_LIST_FIXED_VIEWS.includes(state.view);
 }
 
 function entryListScopeKey() {
-  return [state.view, state.filterSource || '', state.filterCategory || '', state.q || ''].join('|');
+  return [state.view, state.filterSource || '', state.filterCategory || '', state.q || '', [...state.optInSources].sort().join(',')].join('|');
 }
 
-async function loadEntries({ growWindow = false, fullWindow = false } = {}) {
+async function loadEntries({ summary = state.view === 'assets' ? 'full' : state.view === 'hot' ? 'compact' : 'minimal', growWindow = false } = {}) {
   const scopeKey = entryListScopeKey();
   if (scopeKey !== state.entryListScope) {
     state.entryListScope = scopeKey;
@@ -1743,26 +1898,42 @@ async function loadEntries({ growWindow = false, fullWindow = false } = {}) {
     state.entryListLimit += ENTRY_LIST_PAGE_SIZE;
   }
   const p = new URLSearchParams();
+  p.set('optIn', [...state.optInSources].join(','));
+  if (state.view === 'hot') p.set('sort', 'hot');
   if (state.filterSource) p.set('source', state.filterSource);
   if (state.filterCategory) p.set('category', state.filterCategory);
   if (state.q && state.view !== 'assets' && state.view !== 'contributors') p.set('q', state.q);
-  const limit = entryListWindowed() && !fullWindow ? state.entryListLimit : 400;
+  const limit = entryListWindowed() ? state.entryListLimit : 400;
   p.set('limit', String(limit));
+  if (summary !== 'full') p.set('summary', summary);
   if (entriesAbortController) entriesAbortController.abort();
   const controller = new AbortController();
   entriesAbortController = controller;
   const seq = ++entriesRequestSeq;
   let data;
   try {
-    data = await api('/api/entries?' + p.toString(), { signal: controller.signal });
+    const bootstrap = document.getElementById('qm-reader-bootstrap');
+    // Consume at most once, only for the exact default public list. All other
+    // scopes (including saved opt-ins) use the authoritative API as usual.
+    if (bootstrap) {
+      bootstrap.remove();
+      if (summary === 'minimal' && limit === 40 && !state.q && !state.filterSource && !state.filterCategory && !state.optInSources.size) {
+        try {
+          const first = JSON.parse(bootstrap.textContent);
+          const age = Date.now() - first.createdAt;
+          if (first.version === 1 && age >= -60000 && age < 30000 && Array.isArray(first.entries) && first.entries.length > 0 && first.entries.length <= 40) data = first;
+        } catch { /* A missing/invalid bootstrap must not block API loading. */ }
+      }
+    }
+    if (!data) data = await api('/api/entries?' + p.toString(), { signal: controller.signal });
   } catch (err) {
     if (err && err.name === 'AbortError') return false;
     throw err;
   }
   if (seq !== entriesRequestSeq) return false;
-  state.entries = data.entries;
+  state.entries = data.entries.filter(entry => !/^(wechat-|podscribe-)/.test(String(entry.sourceId || '')) || state.optInSources.has(entry.sourceId));
   state.entryRenderLimit = ENTRY_RENDER_BATCH_SIZE;
-  state.entryListHasMore = entryListWindowed() && !fullWindow && Array.isArray(data.entries) && data.entries.length >= limit;
+  state.entryListHasMore = entryListWindowed() && Array.isArray(data.entries) && data.entries.length >= limit;
   return true;
 }
 
@@ -1771,6 +1942,13 @@ function setEntryListUpdating(updating) {
   if (!el) return;
   el.classList.toggle('entry-list-updating', Boolean(updating));
   el.setAttribute('aria-busy', updating ? 'true' : 'false');
+}
+
+function restoreEntryListScroll() {
+  const el = $('#entry-list');
+  if (!el) return;
+  const saved = listScrollPositions.get(entryListScopeKey()) || 0;
+  requestAnimationFrame(() => { el.scrollTop = saved; });
 }
 
 async function loadMoreEntries() {
@@ -1864,37 +2042,7 @@ function entryTitlePenalty(entry) {
 }
 
 function entryQualityBreakdown(entry) {
-  const stats = entryStats(entry);
-  const assets = entry && entry.assets ? entry.assets : {};
-  const ageHours = Math.max(0, (Date.now() - (Number(entry && entry.publishedTs) || Date.now())) / 36e5);
-  const decay = Math.max(1, Math.log2(2 + ageHours / 12));
-  const signals = {
-    likes: (Number(stats.likeCount) || 0) * 4,
-    favorites: (Number(stats.favoriteCount) || 0) * 2.5,
-    helpful: (Number(assets.helpfulCount) || 0) * 3,
-    comments: (Number(assets.comments) || 0) * 2,
-    annotations: (Number(assets.annotations) || 0) * 1.6,
-    aiAssets: (assetCountForType(entry, 'translation') + assetCountForType(entry, 'rewrite')) * 1.4,
-    chat: (Number(assets.chatMessages) || 0) * 1.1,
-    reads: Math.min(8, (Number(stats.viewCount) || 0) / 8),
-  };
-  const penalties = {
-    dislikes: (Number(stats.dislikeCount) || 0) * 3,
-    title: entryTitlePenalty(entry),
-  };
-  const positive = Object.values(signals).reduce((sum, value) => sum + value, 0);
-  const negative = Object.values(penalties).reduce((sum, value) => sum + value, 0);
-  const raw = Math.max(0, positive - negative);
-  return {
-    score: raw / decay,
-    raw,
-    positive,
-    negative,
-    decay,
-    ageHours,
-    signals,
-    penalties,
-  };
+  return window.QMRanking.breakdown(entry);
 }
 
 function entryQualityScore(entry) {
@@ -1914,7 +2062,8 @@ function qScoreParts(entry) {
     q.signals.reads ? `阅读 +${q.signals.reads.toFixed(1)}` : '',
     q.penalties.dislikes ? `负反馈 -${q.penalties.dislikes.toFixed(1)}` : '',
     q.penalties.title ? `标题惩罚 -${q.penalties.title.toFixed(1)}` : '',
-    `时间衰减 ÷${q.decay.toFixed(2)}`,
+    q.signals.updates ? `近期内容 +${q.signals.updates.toFixed(1)}` : '',
+    '互动热度每 72 小时减半',
   ].filter(Boolean);
   return { ...q, parts };
 }
@@ -2028,18 +2177,30 @@ function recordEntryView(entryId) {
 }
 
 async function loadMe() {
-  const data = await api('/api/me');
-  state.registrationEnabled = data.capabilities?.registration !== false;
-  renderRegistrationAvailability();
-  setCurrentUser(data.user || null);
-  await loadUserEntryStates();
-  loadAiProfilesForScope();
-  renderAuthState();
-  renderEntryStateUi();
-  renderComments();
-  renderAgent();
-  renderAiSettings();
-  return state.me;
+  const revision = state.authRevision || 0;
+  try {
+    const data = await api('/api/me', { timeoutMs: 4000 });
+    state.registrationEnabled = data.capabilities?.registration !== false;
+    renderRegistrationAvailability();
+    // Manual login/logout takes precedence over an older session lookup.
+    if (revision !== (state.authRevision || 0)) return state.me;
+    setCurrentUser(data.user || null);
+    state.authReady = true;
+    renderAuthState();
+    await loadUserEntryStates();
+    loadAiProfilesForScope();
+    renderEntryStateUi();
+    renderComments();
+    renderAgent();
+    renderAiSettings();
+    return state.me;
+  } catch (error) {
+    if (revision === (state.authRevision || 0)) state.authRestoreFailed = true;
+    throw error;
+  } finally {
+    state.authReady = true;
+    renderAuthState();
+  }
 }
 
 /* ---------- Sidebar ---------- */
@@ -2047,15 +2208,20 @@ function unreadCountFor(pred) {
   return state.entries.filter(e => pred(e) && !state.read.has(e.id)).length;
 }
 
+// 列表按窗口加载（60/120/…），hasMore 时计数只是窗口内统计，用 n+ 表达而非伪装成全量
 function entryWindowCountLabel(count) {
-  const value = Number(count) || 0;
-  if (!value) return '';
-  return state.entryListHasMore ? `${value}+` : String(value);
+  const n = Number(count) || 0;
+  if (!n) return '';
+  return state.entryListHasMore ? `${n}+` : String(n);
+}
+
+function entryBelongsToSource(entry, sourceId) {
+  return Boolean(entry && (entry.sourceId === sourceId || (Array.isArray(entry.feedSourceIds) && entry.feedSourceIds.includes(sourceId))));
 }
 
 function renderSidebar() {
-  const groups = { article: [], news: [], podcast: [] };
-  for (const s of state.sources) if (s.enabled) groups[s.category]?.push(s);
+  const groups = { article: [], news: [], podcast: [], community: [] };
+  for (const s of state.sources) if (s.enabled && (!s.optIn || (s.category === 'podcast' && state.optInSources.has(s.id)))) groups[s.category]?.push(s);
 
   const wrap = $('#feed-groups');
   wrap.innerHTML = '';
@@ -2067,16 +2233,50 @@ function renderSidebar() {
     label.style.cursor = 'pointer';
     label.title = `查看全部${CATEGORY_LABELS[cat]}`;
     label.onclick = () => selectCategory(cat);
+    if (cat === 'podcast') {
+      label.classList.add('wechat-group-label');
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'wechat-add-btn';
+      add.setAttribute('aria-label', '添加播客');
+      add.title = '添加播客';
+      setElementIcon(add, 'plus');
+      add.onclick = event => { event.stopPropagation(); openPodcastCatalog(add); };
+      label.appendChild(add);
+    }
     wrap.appendChild(label);
 
     for (const s of list) {
       const btn = document.createElement('button');
       btn.className = 'feed-item' + (state.filterSource === s.id ? ' active' : '');
-      const unread = unreadCountFor(e => e.sourceId === s.id);
+      const unread = unreadCountFor(e => entryBelongsToSource(e, s.id));
       btn.innerHTML = `${faviconHtml(s.siteUrl, s.name)}
-        <span class="fname" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</span>
+        <span class="fname" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}${s.id.startsWith('podscribe-') ? ' · 文稿' : ''}</span>
         ${s.status === 'error' ? '<span class="err-dot" title="抓取失败"></span>' : ''}
         <span class="fcount">${unread || ''}</span>`;
+      btn.onclick = () => selectSource(s.id);
+      wrap.appendChild(btn);
+    }
+  }
+
+  const wechatSources = state.sources.filter(source => source.optIn && source.enabled && source.id.startsWith('wechat-'));
+  if (wechatSources.length) {
+    const label = document.createElement('div');
+    label.className = 'group-label wechat-group-label';
+    label.textContent = '微信公众号';
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'wechat-add-btn';
+    add.setAttribute('aria-label', '添加微信公众号');
+    setElementIcon(add, 'plus');
+    add.onclick = openWechatCatalog;
+    label.appendChild(add);
+    wrap.appendChild(label);
+    for (const s of wechatSources.filter(source => state.optInSources.has(source.id))) {
+      const btn = document.createElement('button');
+      btn.className = 'feed-item' + (state.filterSource === s.id ? ' active' : '');
+      const unread = unreadCountFor(entry => entryBelongsToSource(entry, s.id));
+      btn.innerHTML = `${faviconHtml(s.siteUrl, s.name)}<span class="fname">${escapeHtml(s.name)}</span><span class="fcount">${unread || ''}</span>`;
       btn.onclick = () => selectSource(s.id);
       wrap.appendChild(btn);
     }
@@ -2090,8 +2290,236 @@ function renderSidebar() {
   $('#count-contributors').textContent = state.contributors.length || '';
   renderAssetDashboard();
   renderSidebarMore();
+  syncMobileTabbar(); // UI-MOBILE
 
-  $$('.view-btn[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === state.view && !state.filterSource && !state.filterCategory));
+  $$('.view-btn[data-view]').forEach(b => b.classList.toggle('active', !$('#app').classList.contains('podscribe-mode') && b.dataset.view === state.view && !state.filterSource && !state.filterCategory));
+}
+
+const PODCAST_RECOMMENDATIONS = [
+  ['Lex Fridman Podcast', '莱克斯·弗里德曼播客', 'lex-fridman-podcast-artificial-intelligence-ai'],
+  ['All-In Podcast', 'All-In 商业科技播客', 'all-in-with-chamath-jason-sacks-friedberg', 'allin'],
+  ['Acquired', '收购秘史', 'acquired'],
+  ['Pivot', '科技与商业转向', 'pivot'],
+  ['Invest Like the Best', '向顶尖投资者学习', 'invest-like-the-best'],
+  ['Masters of Scale', '规模化大师', 'masters-of-scale'],
+  ['The Diary Of A CEO', '一位 CEO 的日记', 'the-diary-of-a-ceo-with-steven-bartlett'],
+  ['The Prof G Pod', 'G 教授播客', 'the-prof-g-pod-with-scott-galloway'],
+  ['Freakonomics Radio', '魔鬼经济学电台', 'freakonomics-radio'],
+  ['The Joe Rogan Experience', '乔·罗根体验', 'the-joe-rogan-experience', 'joerogan'],
+];
+let podcastCatalogTrigger = null;
+let podcastSearchTimer = null;
+let podcastSearchSerial = 0;
+
+function podcastRecommendation(show) {
+  return PODCAST_RECOMMENDATIONS.find(item => item[2] === show.slug || item[0].toLowerCase() === String(show.name || '').toLowerCase());
+}
+
+function closePodcastCatalog() {
+  clearTimeout(podcastSearchTimer);
+  podcastSearchSerial++;
+  $('#podcast-subscribe-modal').classList.add('hidden');
+  if (podcastCatalogTrigger?.isConnected) podcastCatalogTrigger.focus();
+}
+
+function openPodcastCatalog(trigger) {
+  podcastCatalogTrigger = trigger;
+  $('#podcast-subscribe-query').value = '';
+  $('#podcast-subscribe-status').textContent = '';
+  $('#podcast-subscribe-section').textContent = '推荐播客';
+  renderPodcastCatalog(PODCAST_RECOMMENDATIONS.map(([name, nameZh, slug, sourceId]) => ({ name, nameZh, slug, sourceId })));
+  $('#podcast-subscribe-modal').classList.remove('hidden');
+  $('#podcast-subscribe-query').focus();
+}
+
+function renderPodcastCatalog(shows) {
+  const list = $('#podcast-subscribe-list');
+  list.replaceChildren();
+  if (!shows.length) {
+    const empty = document.createElement('p');
+    empty.className = 'podcast-subscribe-empty';
+    empty.textContent = '没有找到相关播客。试试完整英文名或更短的关键词。';
+    list.appendChild(empty);
+    return;
+  }
+  for (const show of shows) {
+    if (!show?.slug || !show?.name) continue;
+    const recommendation = podcastRecommendation(show);
+    const existing = state.sources.find(source => source.id === (show.sourceId || recommendation?.[3] || `podscribe-${show.slug}`));
+    const subscribed = Boolean(existing && (!existing.optIn || state.optInSources.has(existing.id)));
+    const row = document.createElement('div');
+    row.className = 'podcast-subscribe-row';
+    const info = document.createElement('div');
+    info.className = 'podcast-subscribe-info';
+    const name = document.createElement('strong');
+    name.textContent = show.name;
+    const chinese = document.createElement('span');
+    chinese.textContent = show.nameZh || recommendation?.[1] || '中文译名待补充';
+    info.append(name, chinese);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'ghost-btn';
+    button.textContent = subscribed ? '查看' : '订阅';
+    button.setAttribute('aria-label', `${subscribed ? '查看' : '订阅'} ${show.name}`);
+    button.onclick = async () => {
+      if (subscribed) { closePodcastCatalog(); selectSource(existing.id); return; }
+      if (!state.me && !existing) {
+        closePodcastCatalog();
+        openAuth('login');
+        return;
+      }
+      button.disabled = true;
+      button.textContent = '订阅中…';
+      $('#podcast-subscribe-status').textContent = '';
+      try {
+        const source = existing || (await api('/api/podscribe/subscribe', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slug: show.slug, name: show.name, nameZh: show.nameZh || recommendation?.[1] || '' }),
+        })).source;
+        state.optInSources.add(source.id);
+        storage.setItem('qm_podcast_sources', JSON.stringify([...state.optInSources].filter(id => id.startsWith('podscribe-'))));
+        await loadSources();
+        closePodcastCatalog();
+        await reload({ keepReader: false, clearUrl: false });
+        selectSource(source.id);
+      } catch (error) {
+        $('#podcast-subscribe-status').textContent = error.message === 'Failed to fetch'
+          ? '网络暂时不可用，请稍后重试。' : `订阅失败：${error.message}`;
+        button.disabled = false;
+        button.textContent = '重试';
+      }
+    };
+    row.append(info, button);
+    list.appendChild(row);
+  }
+}
+
+async function searchPodcastCatalog(query) {
+  const serial = ++podcastSearchSerial;
+  const q = query.trim();
+  if (!q) {
+    $('#podcast-subscribe-section').textContent = '推荐播客';
+    $('#podcast-subscribe-status').textContent = '';
+    renderPodcastCatalog(PODCAST_RECOMMENDATIONS.map(([name, nameZh, slug, sourceId]) => ({ name, nameZh, slug, sourceId })));
+    return;
+  }
+  $('#podcast-subscribe-section').textContent = '搜索结果';
+  $('#podcast-subscribe-status').textContent = '搜索中…';
+  try {
+    const result = await api(`/api/podscribe/search?q=${encodeURIComponent(q)}`);
+    if (serial !== podcastSearchSerial) return;
+    $('#podcast-subscribe-status').textContent = '';
+    renderPodcastCatalog(result.podcasts || []);
+  } catch {
+    if (serial !== podcastSearchSerial) return;
+    const local = PODCAST_RECOMMENDATIONS.filter(([name, nameZh]) => `${name} ${nameZh}`.toLowerCase().includes(q.toLowerCase()));
+    renderPodcastCatalog(local.map(([name, nameZh, slug, sourceId]) => ({ name, nameZh, slug, sourceId })));
+    $('#podcast-subscribe-status').textContent = '在线搜索暂时不可用，下面是本地推荐结果。';
+  }
+}
+
+let wechatCatalogRecords = [];
+let wechatCatalogPageSize = 60;
+let wechatCatalogLoading = false;
+let wechatCatalogTrigger = null;
+
+function closeWechatCatalog() {
+  $('#wechat-modal').classList.add('hidden');
+  if (wechatCatalogTrigger?.isConnected) wechatCatalogTrigger.focus();
+}
+
+async function openWechatCatalog() {
+  wechatCatalogTrigger = document.activeElement;
+  $('#wechat-query').value = '';
+  wechatCatalogLoading = true;
+  $('#wechat-status').textContent = '正在加载公众号目录…';
+  $('#wechat-modal').classList.remove('hidden');
+  $('#wechat-query').focus();
+  renderWechatCatalog();
+  try {
+    const result = await api('/api/wechat/catalog');
+    wechatCatalogRecords = result.accounts || [];
+    $('#wechat-status').textContent = '';
+  } catch (error) {
+    $('#wechat-status').textContent = `目录暂时不可用：${error.message}；已订阅的公众号仍可阅读。`;
+  }
+  wechatCatalogLoading = false;
+  renderWechatCatalog();
+}
+
+function renderWechatCatalog() {
+  const list = $('#wechat-list');
+  list.replaceChildren();
+  const query = $('#wechat-query').value.trim().toLocaleLowerCase();
+  const accounts = wechatCatalogRecords.filter(item => !query || item.name.toLocaleLowerCase().includes(query));
+  $('#wechat-results-label').textContent = query ? '搜索结果' : '全部公众号';
+  $('#wechat-result-count').textContent = wechatCatalogLoading ? '' : `${accounts.length} 个`;
+  if (!accounts.length) {
+    if (wechatCatalogLoading || $('#wechat-status').textContent) return;
+    const empty = document.createElement('p');
+    empty.className = 'wechat-catalog-empty';
+    empty.textContent = query ? '没有找到相关公众号，试试更短的名称。' : '目录中暂无公众号。';
+    list.appendChild(empty);
+    return;
+  }
+  for (const account of accounts.slice(0, wechatCatalogPageSize)) {
+    const source = state.sources.find(item => item.bestblogsWechatId === account.id);
+    const row = document.createElement('div');
+    row.className = 'wechat-catalog-row';
+    const info = document.createElement('div');
+    info.className = 'wechat-catalog-info';
+    const name = document.createElement('strong');
+    name.textContent = account.name;
+    info.appendChild(name);
+    if (source?.entryCount) {
+      const count = document.createElement('span');
+      count.textContent = `${source.entryCount} 篇`;
+      info.appendChild(count);
+    }
+    row.appendChild(info);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'wechat-catalog-action';
+    const selected = Boolean(source && state.optInSources.has(source.id));
+    button.classList.toggle('is-selected', selected);
+    button.textContent = selected ? '移除' : '订阅';
+    button.setAttribute('aria-label', `${selected ? '移除' : '订阅'} ${account.name}`);
+    button.onclick = async () => {
+      if (!selected && !source && !state.me) { $('#wechat-modal').classList.add('hidden'); openAuth('login'); return; }
+      button.disabled = true;
+      try {
+        let target = source;
+        if (!selected && !target) {
+          const result = await api('/api/wechat/subscribe', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: account.id }),
+          });
+          target = result.source;
+          await loadSources();
+        }
+        if (selected) state.optInSources.delete(target.id);
+        else state.optInSources.add(target.id);
+        storage.setItem('qm_wechat_sources', JSON.stringify([...state.optInSources].filter(id => id.startsWith('wechat-'))));
+        if (selected && state.filterSource === target.id) state.filterSource = null;
+        await reload({ keepReader: !selected || state.activeEntry?.sourceId !== target.id });
+        renderWechatCatalog();
+        if (!selected) { $('#wechat-modal').classList.add('hidden'); selectSource(target.id); }
+      } catch (error) {
+        $('#wechat-status').textContent = `订阅失败：${error.message}`;
+        button.disabled = false;
+      }
+    };
+    row.appendChild(button);
+    list.appendChild(row);
+  }
+  if (accounts.length > wechatCatalogPageSize) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'wechat-catalog-more';
+    more.textContent = `显示更多 · 还剩 ${accounts.length - wechatCatalogPageSize} 个`;
+    more.onclick = () => { wechatCatalogPageSize += 60; renderWechatCatalog(); };
+    list.appendChild(more);
+  }
 }
 
 function renderSidebarMore() {
@@ -2128,6 +2556,45 @@ function assetCountForType(entry, type) {
 function entryHasAssetType(entry, type) {
   if (ASSET_FILTER_TYPES.includes(type)) return assetCountForType(entry, type) > 0;
   return hasEntryAssets(entry);
+}
+
+function isChineseNativeEntry(entry = state.activeEntry) {
+  if (!entry) return false;
+  const declared = String(entry.language || entry.lang || '').trim().toLowerCase();
+  if (declared) return declared === 'zh' || declared.startsWith('zh-') || declared.startsWith('zh_') || declared === 'cmn';
+  const sample = [entry.title, entry.summary].filter(Boolean).join('\n');
+  const cjk = (sample.match(/[㐀-鿿豈-﫿]/g) || []).length;
+  const latin = (sample.match(/[A-Za-z]/g) || []).length;
+  if (!cjk && !latin) return false;
+  return cjk >= 8 && cjk / Math.max(1, cjk + latin) >= 0.3;
+}
+
+function entryRewriteStatus(entry = state.activeEntry) {
+  // 'native' | 'ready' | 'failed' | 'pending'
+  if (!entry) return 'pending';
+  if (isChineseNativeEntry(entry)) return 'native';
+  const assets = entry.assets && typeof entry.assets === 'object' ? entry.assets : {};
+  const raw = String(entry.rewriteStatus || assets.rewriteStatus || '').trim().toLowerCase();
+  const readyFlag = entry.rewriteReady !== undefined ? entry.rewriteReady : assets.rewriteReady;
+  if (readyFlag === true || raw === 'ready' || raw === 'done' || raw === 'completed') return 'ready';
+  if (assetCountForType(entry, 'rewrite') > 0) return 'ready';
+  if (raw === 'failed' || raw === 'error' || raw === 'skipped') return 'failed';
+  if (raw === 'pending' || raw === 'running' || raw === 'retry') return 'pending';
+  return 'missing';
+}
+
+function rewriteStatusBadgeHtml(entry) {
+  const status = entryRewriteStatus(entry);
+  if (status === 'pending') return '<span class="entry-rewrite-status">中文处理中</span>';
+  if (status === 'failed') return '<span class="entry-rewrite-status entry-rewrite-status-failed">改写暂不可用</span>';
+  return '';
+}
+
+function shouldHoldOriginal(entry = state.activeEntry) {
+  if (!entry || state.originalRevealed) return false;
+  if (state.readerTab !== 'rewrite') return false;
+  const status = entryRewriteStatus(entry);
+  return status === 'pending' || status === 'failed';
 }
 
 function normalizeSearchText(value) {
@@ -2208,8 +2675,32 @@ function visibleContributors() {
     .filter(contributor => !needle || normalizeSearchText(contributorSearchText(contributor)).includes(needle));
 }
 
+// Daily batches (Product Hunt, papers, trending) outnumber everything else
+// together, so even spread timestamps leave long single-source runs. Allow at
+// most `maxRun` in a row; extra items wait, in order, until another source
+// breaks the run. Only the web's windowed list uses this (no cursor to break).
+function interleaveSourceRuns(list, maxRun = 2) {
+  const out = [];
+  const waiting = [];
+  let runSource = '';
+  let run = 0;
+  const blocked = entry => entry.sourceId === runSource && run >= maxRun;
+  const push = entry => {
+    if (entry.sourceId === runSource) run++;
+    else { runSource = entry.sourceId; run = 1; }
+    out.push(entry);
+  };
+  for (const entry of list) {
+    if (blocked(entry)) { waiting.push(entry); continue; }
+    push(entry);
+    while (waiting.length && !blocked(waiting[0])) push(waiting.shift());
+  }
+  return out.concat(waiting);
+}
+
 function visibleEntries() {
   let list = state.entries;
+  if ((state.view === 'all' || state.view === 'unread') && !state.filterSource && !state.q) list = interleaveSourceRuns(list);
   if (state.view === 'hot') {
     list = list
       .slice()
@@ -2645,8 +3136,7 @@ function renderEntryPaneTabs() {
   tabs.classList.toggle('hidden', !show);
   if (!show) return;
   const assetCount = homeAssetActivityItems(1000).length;
-  const entryCount = state.entries.length;
-  $('#home-entry-count').textContent = entryCount;
+  $('#home-entry-count').textContent = entryWindowCountLabel(state.entries.length);
   $('#home-asset-count').textContent = assetCount;
   $$('#entry-pane-tabs [data-home-tab]').forEach(btn => {
     const active = btn.dataset.homeTab === state.homeTab;
@@ -3243,7 +3733,7 @@ function applyServerEntryUpdate(entry) {
   if (state.activeEntry?.id === entry.id) {
     state.activeEntry = updated;
     renderTitle(updated);
-    renderOriginalContent(updated, updated.content || contentCache.get(updated.id) || '');
+    if (!shouldHoldOriginal(updated)) renderOriginalContent(updated, updated.content || contentCache.get(updated.id) || '');
     updateFetchOriginalButton(updated);
   }
   renderList();
@@ -3265,10 +3755,18 @@ function renderAdminEntryControls() {
 
 function renderAuthState() {
   const loggedIn = Boolean(state.me);
-  $('#auth-open')?.classList.toggle('hidden', loggedIn);
+  const restoring = !state.authReady;
+  const authOpen = $('#auth-open');
+  authOpen?.classList.toggle('hidden', loggedIn);
   $('#account-info')?.classList.toggle('hidden', !loggedIn);
   $('#account-settings-open')?.classList.toggle('hidden', !loggedIn);
-  if (!loggedIn) {
+  if (authOpen && !loggedIn) {
+    authOpen.disabled = false;
+    authOpen.innerHTML = restoring
+      ? '<span class="account-avatar">Q</span><span class="account-text"><strong>登录</strong><span>无需登录，可直接阅读</span></span>'
+      : '<span class="account-avatar" id="guest-avatar">Q</span><span class="account-text"><strong>登录</strong><span>收藏和进度会跟着你走</span></span>';
+  }
+  if (!loggedIn && !restoring) {
     setAccountMenuOpen(false);
     closeChangePasswordModal();
   }
@@ -3373,6 +3871,8 @@ function requireAuth(mode = 'login') {
 function openSubmitLinkModal(prefill = {}) {
   const next = {
     url: String(prefill.url || '').trim(),
+    title: String(prefill.title || '').trim(),
+    markdown: String(prefill.markdown || '').trim(),
     note: String(prefill.note || '').trim(),
   };
   if (!state.me) {
@@ -3382,6 +3882,8 @@ function openSubmitLinkModal(prefill = {}) {
     return false;
   }
   $('#submit-link-url').value = next.url || '';
+  $('#submit-link-title').value = next.title || '';
+  $('#submit-link-markdown').value = next.markdown || '';
   $('#submit-link-note').value = next.note || '';
   $('#submit-link-submit').disabled = false;
   $('#submit-link-submit').textContent = '提交';
@@ -3394,9 +3896,28 @@ function closeSubmitLinkModal() {
   $('#submit-link-modal').classList.add('hidden');
 }
 
+async function showSubmittedLinkResult(data, { markdown = '' } = {}) {
+  if (data.pending) {
+    toast(markdown ? '已进入审核队列，通过后公开提交的正文' : '已进入审核队列，通过后才会抓取和公开');
+    return;
+  }
+  const message = data.duplicate ? '该链接已收录到本站' : '已收录到本站';
+  toast(message + (data.rewriteQueued ? '，已安排生成中文改写' : ''));
+  try {
+    await Promise.all([loadSources(), loadEntries(), loadContributors()]);
+    updateListTitle();
+    renderList();
+    renderSidebar();
+  } catch {
+    toast(message + '，列表刷新失败，请刷新页面查看', 5000);
+  }
+}
+
 async function submitReaderLink() {
   if (!requireAuth('login')) return;
   const url = $('#submit-link-url').value.trim();
+  const title = $('#submit-link-title').value.trim();
+  const markdown = $('#submit-link-markdown').value.trim();
   const note = $('#submit-link-note').value.trim();
   if (!url) {
     toast('请填写链接');
@@ -3409,10 +3930,10 @@ async function submitReaderLink() {
     const data = await api('/api/submit-link', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, note }),
+      body: JSON.stringify({ url, title, markdown, note }),
     });
     closeSubmitLinkModal();
-    if (data.pending) toast('已进入审核队列，通过后才会抓取和公开');
+    await showSubmittedLinkResult(data, { markdown });
   } catch (err) {
     toast('提交失败: ' + err.message, 5000);
   } finally {
@@ -3563,12 +4084,98 @@ function renderContributorDirectory() {
   el.appendChild(frag);
 }
 
+// UI-LIST: calm placeholder rows instead of a loading sentence.
+function listSkeletonHtml(rows = 6) {
+  const row = '<div class="qm-skeleton-row" aria-hidden="true"><i></i><b></b><b></b><b></b></div>';
+  return `<div class="qm-skeleton" role="status" aria-label="正在加载文章">${row.repeat(rows)}</div>`;
+}
+
+// UI-LIST: drop boilerplate labels such as "📌 一句话摘要" so the list shows the summary itself.
+// One line under the title, in the same language as the title: an English
+// teaser under a Chinese title is noise, and so is a summary that repeats it.
+function entryCardSummary(entry) {
+  const text = listSummaryText(entry.summaryZh || entry.summary);
+  if (!text) return '';
+  const hasCjk = /[\u3400-\u9fff]/.test(text);
+  if (entry.titleZh && !hasCjk) return '';
+  const title = normalizeSearchText(entry.titleZh || entry.title);
+  if (title && normalizeSearchText(text).startsWith(title.slice(0, 24))) return '';
+  return text;
+}
+
+function listSummaryText(summary) {
+  return String(summary || '').replace(/^\s*(?:📌\s*)?(?:一句话摘要|摘要|TL;?DR)\s*[:：]?\s*/i, '').trim();
+}
+
+/* UI-MOBILE: article prefetch. On pointer-down / hover intent we start
+   GET /api/entry/:id so the body is usually in hand by the time click fires. */
+const entryPrefetches = new Map();
+function retainEntryBundle(id, task) {
+  entryPrefetches.set(id, task);
+  if (entryPrefetches.size > 24) entryPrefetches.delete(entryPrefetches.keys().next().value);
+  const remove = () => { if (entryPrefetches.get(id) === task) entryPrefetches.delete(id); };
+  // Short-lived, account-scoped memory only. Returning to a just-read article
+  // must not blank already delivered text while another request struggles.
+  setTimeout(remove, 30000);
+  task.then(data => { if (!data?.rewrite?.body?.trim()) remove(); }, remove);
+  return task;
+}
+
+function prefetchEntry(entryId) {
+  const id = String(entryId || '');
+  if (!id || state.activeEntry?.id === id || contentCache.has(id) || entryPrefetches.has(id)) return entryPrefetches.get(id) || null;
+  return retainEntryBundle(id, api(`/api/entry/${id}`)).catch(() => null);
+}
+
+function takeArticleBootstrap(entryId) {
+  const node = document.getElementById('qm-article-bootstrap');
+  if (!node) return null;
+  node.remove();
+  try {
+    const data = JSON.parse(node.textContent);
+    const matches = data.entry?.id === entryId || (String(entryId).length >= 12 && data.entry?.id?.startsWith(entryId));
+    // It belongs to this no-store HTML response and is consumed once. Slow script
+    // downloads must not discard a body already received with the document.
+    if (data.version === 1 && data.pathname === window.location.pathname && matches) {
+      if (!data.rewriteAssetId) retainEntryBundle(data.entry.id, Promise.resolve(data));
+      return data;
+    }
+  } catch { /* Invalid inline data falls back to an authoritative read. */ }
+  return null;
+}
+
+function readEntryBundle(entryId) {
+  return entryPrefetches.get(entryId) || retainEntryBundle(entryId, api(`/api/entry/${entryId}`));
+}
+
+/* UI-MOBILE: infinite list. The last "load more" row doubles as a sentinel:
+   when it nears the viewport we trigger it, so scrolling just keeps going. */
+let listSentinelObserver = null;
+function observeListSentinel(listEl) {
+  if (listSentinelObserver) listSentinelObserver.disconnect();
+  const sentinel = listEl.querySelector(':scope > .list-load-more:last-child');
+  if (!sentinel || typeof IntersectionObserver !== 'function') return;
+  listSentinelObserver = new IntersectionObserver(items => {
+    if (!items.some(item => item.isIntersecting) || sentinel.disabled) return;
+    listSentinelObserver.disconnect();
+    sentinel.click();
+  }, { root: listEl, rootMargin: '0px 0px 600px 0px' });
+  listSentinelObserver.observe(sentinel);
+}
+
+function entryListSkeletonHtml(rows = 6) {
+  return listSkeletonHtml(rows);
+}
+
 function renderList() {
   $('#app').classList.toggle('view-assets', state.view === 'assets');
   $('#app').classList.toggle('view-contributors', state.view === 'contributors');
   $('#app').classList.toggle('home-assets', isHomeScope() && state.homeTab === 'assets');
   renderListScopeBar();
   renderEntryPaneTabs();
+  const scopeEntries = visibleEntries();
+  $('#list-scope-count').textContent = `${scopeEntries.length} 篇 · ${scopeEntries.filter(entry => !state.read.has(entry.id)).length} 未读`;
+  $('#list-context-row').classList.toggle('hidden', state.view === 'contributors');
   $('#mark-read-btn').classList.toggle('hidden', state.view === 'contributors' || (isHomeScope() && state.homeTab === 'assets'));
   if (state.view === 'contributors') {
     renderContributorDirectory();
@@ -3595,7 +4202,13 @@ function renderList() {
       ? '还没有浏览记录<br/>打开几篇文章后会出现在这里'
       : state.view === 'hot'
       ? '还没有足够反馈<br/>提交链接、点赞或收藏后会逐步形成热门列表'
-      : '这里空空如也<br/>试试刷新或切换视图';
+      : state.q
+      ? `没有找到“${escapeHtml(state.q)}”<br/>也许它还没被写出来。换个关键词试试`
+      : state.view === 'starred'
+      ? '还没有收藏<br/>好文章值得被留下，读到时按 S'
+      : state.view === 'unread'
+      ? 'Inbox Zero，达成<br/>全部读完了。去窗外看看远处吧'
+      : '这里还安静着<br/>换一个频道看看，或稍后再来';
     el.innerHTML = `<div class="list-empty">${text}</div>`;
     return;
   }
@@ -3603,14 +4216,9 @@ function renderList() {
   const frag = document.createDocumentFragment();
   for (const e of visibleList) {
     const src = sourceById(e.sourceId);
-    const assetsHtml = assetBadgesHtml(e, { interactive: true });
-    const entryActivity = assetActivityLabel(e) || entryHistoryLabel(e) || hotEntryLabel(e);
-    const statsLine = entryStatsLabel(e);
-    const metaRow = [statsLine ? `<span class="entry-stats">${escapeHtml(statsLine)}</span>` : '', assetsHtml ? `<span class="asset-badges entry-asset-badges">${assetsHtml}</span>` : ''].filter(Boolean).join('');
-    const assetPreview = assetPreviewForEntry(e);
-    const assetItems = assetItemListHtml(e);
-    const publishedLabel = timeAgo(e.publishedTs);
+    const publishedLabel = e.publishedTs ? timeAgo(e.publishedTs) : podcastRelativeDateLabel(e.publishedRelative);
     const sourceName = src ? src.name : e.sourceId;
+    const summaryText = entryCardSummary(e);
     const card = document.createElement('div');
     card.className = 'entry-card' + (state.read.has(e.id) ? ' read' : '') + (state.activeEntry?.id === e.id ? ' active' : '');
     card.dataset.id = e.id;
@@ -3626,14 +4234,11 @@ function renderList() {
             <span class="src">${escapeHtml(sourceName)}</span>
           </div>
           <time class="entry-time" datetime="${escapeHtml(e.published || '')}">${escapeHtml(publishedLabel)}</time>
+          ${rewriteStatusBadgeHtml(e)}
           ${state.starred.has(e.id) ? `<span class="entry-star">${lucideIcon('star')}</span>` : ''}
         </div>
         <div class="entry-title">${escapeHtml(e.titleZh || e.title)}</div>
-        ${e.titleZh ? `<div class="entry-original">${escapeHtml(e.title)}</div>` : ''}
-        ${e.summary ? `<div class="entry-summary">${escapeHtml(e.summary)}</div>` : ''}
-        ${metaRow ? `<div class="entry-meta-row">${metaRow}</div>` : ''}
-        ${assetItems || (assetPreview ? assetPreviewHtml(assetPreview) : '')}
-        ${entryActivity ? `<div class="entry-asset-activity">${escapeHtml(entryActivity)}</div>` : ''}
+        ${summaryText ? `<div class="entry-summary">${escapeHtml(summaryText)}</div>` : ''}
       </div>
       ${e.image ? `<div class="entry-media"><img class="entry-thumb" src="${escapeHtml(e.image)}" alt="" loading="lazy" decoding="async" onerror="this.closest('.entry-media')?.remove()" /></div>` : ''}`;
     card.onclick = (event) => {
@@ -3689,13 +4294,19 @@ function renderList() {
     };
     frag.appendChild(card);
   }
+  if (visibleList.length === list.length && !state.entryListHasMore && list.length > 5 && !state.q) {
+    const end = document.createElement('div');
+    end.className = 'qm-list-end';
+    end.innerHTML = '<span>到底了</span><small>互联网读不完，眼睛要休息。</small>';
+    frag.appendChild(end);
+  }
   if (visibleList.length < list.length) {
     const more = document.createElement('button');
     const remaining = list.length - visibleList.length;
     more.type = 'button';
     more.className = 'list-load-more';
-    more.textContent = `继续显示 · 还有 ${remaining} 条`;
-    more.setAttribute('aria-label', `继续显示文章，还有 ${remaining} 条`);
+    more.textContent = `显示更多 · 还有 ${remaining} 篇`;
+    more.setAttribute('aria-label', `显示更多文章，还有 ${remaining} 篇`);
     more.onclick = () => {
       const scrollTop = el.scrollTop;
       const nextId = list[visibleList.length] && list[visibleList.length].id;
@@ -3720,6 +4331,7 @@ function renderList() {
     frag.appendChild(earlier);
   }
   el.appendChild(frag);
+  observeListSentinel(el);
 }
 
 function updateListTitle() {
@@ -3737,6 +4349,7 @@ function updateListTitle() {
   else if (state.view === 'contributors') title = '贡献榜';
   if (state.q) title += ` · “${state.q}”`;
   $('#list-title').textContent = title;
+  if ($('#list-scope-title')) $('#list-scope-title').textContent = title;
   updateSearchPlaceholder();
   renderSourceRefreshButton();
 }
@@ -3744,6 +4357,7 @@ function updateListTitle() {
 function updateSearchPlaceholder() {
   const search = $('#search');
   if (!search) return;
+  search.disabled = false;
   search.placeholder = state.view === 'contributors' ? '搜索贡献榜…' : state.view === 'assets' ? '搜索资产…' : '搜索文章…';
   if (search.value !== state.q) search.value = state.q;
 }
@@ -3757,12 +4371,18 @@ function renderSourceRefreshButton() {
       && state.refreshing
       && (!state.refreshProgress.sourceId || state.refreshProgress.sourceId === source.id)
   );
-  btn.classList.toggle('hidden', !source);
-  btn.classList.toggle('refreshing', sourceRefreshing);
-  btn.disabled = sourceRefreshing;
-  setElementIcon(btn, sourceRefreshing ? 'loader-circle' : 'refresh-cw', {
-    className: sourceRefreshing ? 'app-icon app-icon-spin' : 'app-icon',
+  btn.classList.toggle('hidden', state.view === 'contributors');
+  const busy = sourceRefreshing || Boolean(state.listRefreshBusy);
+  btn.classList.toggle('refreshing', busy);
+  btn.disabled = sourceRefreshing || Boolean(state.listRefreshBusy);
+  btn.setAttribute('aria-busy', String(btn.disabled));
+  setElementIcon(btn, busy ? 'loader-circle' : 'refresh-cw', {
+    className: busy ? 'app-icon app-icon-spin' : 'app-icon',
   });
+  if (!source) {
+    btn.title = state.listRefreshBusy ? '正在更新列表' : '刷新当前列表';
+    btn.setAttribute('aria-label', btn.title);
+  }
   if (source) {
     btn.title = `${sourceRefreshing ? '正在检查' : '检查'} ${source.name} 更新`;
     btn.setAttribute('aria-label', btn.title);
@@ -4026,13 +4646,43 @@ function clampNumber(value, min, max, fallback) {
 
 function normalizeReaderPrefs(raw = {}) {
   const prefs = raw && typeof raw === 'object' ? raw : {};
-  const font = READER_FONTS[prefs.font] ? prefs.font : READER_PREF_DEFAULTS.font;
+  const requestedFont = READER_FONT_ALIASES[prefs.font] || prefs.font;
+  const font = READER_FONTS[requestedFont] ? requestedFont : READER_PREF_DEFAULTS.font;
   return {
-    fontSize: clampNumber(prefs.fontSize, 15, 20, READER_PREF_DEFAULTS.fontSize),
-    lineHeight: clampNumber(prefs.lineHeight, 1.65, 2.05, READER_PREF_DEFAULTS.lineHeight),
-    measure: clampNumber(prefs.measure, 56, 84, READER_PREF_DEFAULTS.measure),
+    fontSize: clampNumber(prefs.fontSize, 14, 24, READER_PREF_DEFAULTS.fontSize),
+    lineHeight: nearestStep(clampNumber(prefs.lineHeight, 1.6, 2.2, READER_PREF_DEFAULTS.lineHeight), READER_LINE_HEIGHTS),
+    measure: nearestStep(clampNumber(prefs.measure, 56, 84, READER_PREF_DEFAULTS.measure), READER_MEASURES),
     font,
   };
+}
+
+function nearestStep(value, steps) {
+  return steps.reduce((best, step) => (Math.abs(step - value) < Math.abs(best - value) ? step : best), steps[0]);
+}
+
+function loadReaderFont(font) {
+  const href = READER_FONT_STYLESHEETS[font];
+  if (!href || document.getElementById(`qm-reader-font-${font}`)) return;
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = href;
+  link.id = `qm-reader-font-${font}`;
+  document.head.appendChild(link);
+}
+
+function currentReaderPaper() {
+  if (document.body.dataset.theme === 'dark') return 'dark';
+  return document.body.dataset.paper === 'sepia' ? 'sepia' : 'light';
+}
+
+function setReaderPaper(paper) {
+  const next = READER_PAPERS.includes(paper) ? paper : 'light';
+  document.body.dataset.theme = next === 'dark' ? 'dark' : 'light';
+  if (next === 'sepia') document.body.dataset.paper = 'sepia';
+  else delete document.body.dataset.paper;
+  storage.setItem('fr_theme', document.body.dataset.theme);
+  storage.setItem('qm_paper', next === 'sepia' ? 'sepia' : '');
+  renderReaderPrefs();
 }
 
 function persistReaderPrefs() {
@@ -4069,20 +4719,22 @@ function readerLanguageProfile(text) {
 
 function adaptiveReaderMeasure(profile, prefs = state.readerPrefs) {
   const measure = normalizeReaderPrefs(prefs).measure;
+  // Book-page measure: ~36-42 CJK characters per line (39em at the default setting);
+  // clreq suggests 35-45 for screens, and the workbench gives the column more room.
   if (profile === 'cjk') {
     return {
-      value: clampNumber(37 + (measure - 56) * (10 / 28), 37, 47, 42),
+      value: clampNumber(36 + (measure - 56) * (6 / 28), 36, 42, 39),
       unit: 'em',
     };
   }
   if (profile === 'mixed') {
     return {
-      value: clampNumber(measure - 2, 58, 74, 68),
-      unit: 'ch',
+      value: clampNumber(37 + (measure - 56) * (6 / 28), 37, 43, 40),
+      unit: 'em',
     };
   }
   return {
-    value: clampNumber(measure, 60, 76, 70),
+    value: clampNumber(measure + 2, 62, 78, 72),
     unit: 'ch',
   };
 }
@@ -4096,6 +4748,9 @@ function updateReaderLanguageProfile() {
   const effectiveLineHeight = clampNumber(prefs.lineHeight + lineHeightBoost, 1.65, 2.1, prefs.lineHeight);
   document.documentElement.style.setProperty('--reader-measure-setting', `${prefs.measure}ch`);
   document.documentElement.style.setProperty('--reader-measure', `${adaptive.value.toFixed(adaptive.unit === 'em' ? 1 : 0)}${adaptive.unit}`);
+  // Pixel width of the text column so the header and tabs can share its left/right edges.
+  const columnPx = adaptive.value * prefs.fontSize * (adaptive.unit === 'em' ? 1 : 0.56);
+  document.documentElement.style.setProperty('--reader-column', `${Math.round(columnPx)}px`);
   document.documentElement.style.setProperty('--reader-line-height-effective', effectiveLineHeight.toFixed(2));
   document.documentElement.style.setProperty('--reader-paragraph-gap', profile === 'cjk' ? '1.18em' : profile === 'mixed' ? '1.12em' : '1.02em');
   if (reader) {
@@ -4113,6 +4768,7 @@ function applyReaderPrefs() {
   document.documentElement.style.setProperty('--reader-font-size', `${prefs.fontSize}px`);
   document.documentElement.style.setProperty('--reader-line-height', prefs.lineHeight.toFixed(2));
   if (reader) reader.dataset.readerFont = prefs.font;
+  loadReaderFont(prefs.font);
   if (app) app.classList.toggle('reader-immersive', Boolean(state.readerImmersive && state.activeEntry));
   updateReaderLanguageProfile();
   renderLeftCollapseToggle();
@@ -4132,23 +4788,17 @@ function renderReaderPrefs() {
   if (immersive) {
     immersive.classList.toggle('active', Boolean(state.readerImmersive));
     immersive.setAttribute('aria-pressed', state.readerImmersive ? 'true' : 'false');
-    setButtonIconLabel(immersive, state.readerImmersive ? 'minimize-2' : 'maximize-2', '沉浸阅读');
+    setButtonIconLabel(immersive, state.readerImmersive ? 'minimize-2' : 'maximize-2', state.readerImmersive ? '退出沉浸' : '沉浸阅读');
     immersive.title = state.readerImmersive ? '退出沉浸阅读' : '沉浸阅读';
   }
   const fontSizeValue = $('#reader-font-size-value');
   if (fontSizeValue) fontSizeValue.textContent = prefs.fontSize.toFixed(prefs.fontSize % 1 ? 1 : 0);
-  const lineHeight = $('#reader-line-height');
-  if (lineHeight) {
-    lineHeight.value = prefs.lineHeight.toFixed(2);
-    lineHeight.title = `行高 ${prefs.lineHeight.toFixed(2)}`;
-  }
-  const measure = $('#reader-measure');
-  if (measure) {
-    measure.value = String(Math.round(prefs.measure));
-    measure.title = `栏宽 ${Math.round(prefs.measure)}ch`;
-  }
-  const font = $('#reader-font-family');
-  if (font) font.value = prefs.font;
+  const current = { ...prefs, paper: currentReaderPaper() };
+  $$('#reader-preferences [data-pref]').forEach(btn => {
+    const on = String(current[btn.dataset.pref]) === btn.dataset.value;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
 }
 
 function setReaderPrefsOpen(open) {
@@ -4215,7 +4865,7 @@ function visibleAgentPrompts() {
 function renderAgentPrompts() {
   const wrap = $('.agent-prompts');
   if (!wrap) return;
-  const prompts = visibleAgentPrompts().slice(0, 5);
+  const prompts = visibleAgentPrompts().slice(0, 3);
   wrap.innerHTML = `
     <div class="agent-prompt-row" role="list">
       ${prompts.map(item => `
@@ -4804,33 +5454,48 @@ function renderAgentContextStrip() {
     el.innerHTML = '<span>未选择文章</span>';
     return;
   }
-  const assets = mergeAssets(entry);
-  const stats = entryStats(entry);
-  const parts = [
-    ['上下文', '当前文章'],
-    state.agentContext ? ['引用', agentContextTitle(state.agentContext)] : null,
-    ['划线', formatCompactCount((state.annotations || []).length) || '0'],
-    ['点评', formatCompactCount((state.comments || []).length) || '0'],
-    ['对话', formatCompactCount((state.agentMessages || []).length) || '0'],
-  ].filter(Boolean);
-  if (assets.latestAt) parts.push(['资产', formatAssetTime(assets.latestAt)]);
-  if (stats.viewCount) parts.push(['访问', formatCompactCount(stats.viewCount)]);
-  el.innerHTML = parts.map(([label, value]) => `
-    <span class="agent-context-chip"><em>${escapeHtml(label)}</em>${escapeHtml(value)}</span>
-  `).join('');
+  const chars = elementTextForCopy(readerLanguageRoot(state.readerTab)).length;
+  el.textContent = chars ? `本文 ${formatCompactCount(chars)} 字` : '基于本文';
+  el.title = '回答基于当前正文';
 }
 
+// Lines about reading and asking. One per article, so a re-render never reshuffles it.
+const AGENT_EMPTY_QUOTES = [
+  ['学而不思则罔，思而不学则殆。', '《论语》'],
+  ['尽信书，则不如无书。', '《孟子》'],
+  ['博学之，审问之，慎思之，明辨之。', '《中庸》'],
+  ['读书无疑者，须教有疑。', '朱熹'],
+  ['旧书不厌百回读，熟读深思子自知。', '苏轼'],
+  ['好读书，不求甚解。', '陶渊明（我们会帮你求一点）'],
+  ['不动笔墨不读书。', '徐特立'],
+  ['书犹药也，善读之可以医愚。', '刘向'],
+];
+const AGENT_EMPTY_INK = `
+  <svg class="qm-ink" viewBox="0 0 120 80" aria-hidden="true" focusable="false">
+    <path d="M14 26c15-6 30-5 46 3 16-8 31-9 46-3v40c-15-6-30-5-46 3-16-8-31-9-46-3z"/>
+    <path d="M60 29v40"/>
+    <path d="M22 35c10-3 20-3 31 1M22 43c10-3 20-3 31 1M22 51c7-2 14-2 21 0"/>
+    <path class="qm-ink-mark" d="M67 36c10-4 20-4 31-1"/>
+    <path d="M67 44c10-4 20-4 31-1M67 52c7-2 14-2 20-1"/>
+    <path class="qm-ink-note" d="M92 6h16a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4h-9l-5 5v-5h-2a4 4 0 0 1-4-4v-8a4 4 0 0 1 4-4z"/>
+    <path class="qm-ink-note" d="M98 14h8"/>
+  </svg>`;
+
 function agentEmptyHtml(kind = 'empty') {
-  const hasArticle = Boolean(state.activeEntry);
-  const title = !hasArticle ? '先选择一篇文章' : kind === 'busy' ? '正在组织回答' : '围绕当前文章开始伴读';
+  const entry = state.activeEntry;
+  const hasArticle = Boolean(entry);
+  const title = !hasArticle ? '先选一篇文章' : kind === 'busy' ? '正在组织回答…' : '读到哪里，问到哪里';
   const note = !hasArticle
-    ? '未选择上下文。'
-    : '回答会尽量围绕正文；关键事实请回到原文核查。';
+    ? '点开文章后，我会先读完全文，再回答。'
+    : '选中正文里的一段，可以单独问。关键事实，请回原文核对。';
+  const seed = [...String(entry?.id || '')].reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+  const [line, by] = hasArticle ? AGENT_EMPTY_QUOTES[seed % AGENT_EMPTY_QUOTES.length] : ['开卷有益。', '宋太宗'];
   return `
-    <div class="agent-empty agent-empty-state">
-      <div class="agent-empty-mark">AI</div>
+    <div class="agent-empty agent-empty-state qm-empty">
+      ${AGENT_EMPTY_INK}
       <strong>${escapeHtml(title)}</strong>
       <p>${escapeHtml(note)}</p>
+      ${kind === 'busy' ? '' : `<figure class="qm-quote"><blockquote>${escapeHtml(line)}</blockquote><figcaption>${escapeHtml(by)}</figcaption></figure>`}
     </div>`;
 }
 
@@ -4863,12 +5528,18 @@ function renderTitle(e) {
   const originalWrap = $('#reader-title-zh');
   if (originalWrap) originalWrap.classList.toggle('hidden', !originalTitle);
   if (originalLink) setReaderTitleLink(originalLink, originalTitle, e.link, '打开原文');
+  const openOriginal = $('#reader-open-original');
+  if (openOriginal) {
+    openOriginal.classList.toggle('hidden', !e.link);
+    if (e.link) openOriginal.href = e.link;
+    else openOriginal.removeAttribute('href');
+  }
 }
 
 function updateFetchOriginalButton(entry = state.activeEntry) {
   const btn = $('#reader-fetch-original');
   if (!btn) return;
-  const canFetch = Boolean(entry && /^https?:\/\//i.test(entry.link || ''));
+  const canFetch = Boolean(entry && !String(entry.sourceId || '').startsWith('podscribe-') && /^https?:\/\//i.test(entry.link || ''));
   const alreadyHandled = Boolean(entry && (entry.originalFetchedAt || entry.originalFetchAttemptedAt || hasUsableOriginalContent(entry)));
   btn.classList.toggle('hidden', !canFetch || alreadyHandled);
   btn.disabled = !canFetch || alreadyHandled || state.fetchingOriginal;
@@ -4919,6 +5590,22 @@ function renderOriginalContent(entry, content) {
   updateReaderLanguageProfile();
   applyTextAnnotations();
   if (state.pendingAssetJump) settlePendingAssetJump(state.pendingAssetJump, { clear: false });
+}
+
+async function loadPodscribeOriginal(entry) {
+  if (!entry || !(['allin', 'joerogan'].includes(entry.sourceId) || String(entry.sourceId).startsWith('podscribe-'))) return;
+  try {
+    const data = await api(`/api/entry/${encodeURIComponent(entry.id)}/podscribe-transcript`);
+    if (state.activeEntry?.id !== entry.id || !data.transcript) return;
+    const paragraphs = data.transcript.split(/\n+/).map(line => line.trim()).filter(Boolean);
+    const source = /^https:\/\//.test(data.sourceUrl || '')
+      ? `<p><a href="${escapeHtml(data.sourceUrl)}" target="_blank" rel="noopener noreferrer">源文稿页面</a></p>` : '';
+    renderOriginalContent(entry, `${source}<p>播客源文稿 · ${paragraphs.length} 段。自动识别可能有误，请以原音频为准。</p>${paragraphs.map(line => `<p>${escapeHtml(line)}</p>`).join('')}`);
+  } catch (error) {
+    if (String(entry.sourceId).startsWith('podscribe-') && state.activeEntry?.id === entry.id) {
+      renderOriginalContent(entry, `<p>这期源文稿暂时无法取得。请稍后重试，或打开上方的源文稿页面。</p>`);
+    }
+  }
 }
 
 function elementFromNode(node) {
@@ -4992,16 +5679,12 @@ async function submitArticleLinkToSite() {
   if (state.articleLinkSubmitting) return;
   state.articleLinkSubmitting = true;
   try {
-    await api('/api/submit-link', {
+    const data = await api('/api/submit-link', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, note }),
     });
-    await Promise.all([loadSources(), loadEntries(), loadContributors()]);
-    updateListTitle();
-    renderList();
-    renderSidebar();
-    toast('已收录到本站，正在生成中文改写');
+    await showSubmittedLinkResult(data);
   } catch (err) {
     toast('收录失败: ' + err.message, 5000);
   } finally {
@@ -5026,6 +5709,7 @@ function setReaderTab(tab, { syncUrl = true, replaceUrl = true } = {}) {
   updateReaderTocVisibility(next);
   updateReaderLanguageProfile();
   applyTextAnnotations();
+  renderAgentContextStrip();
   if (syncUrl) syncReaderUrl({ replace: replaceUrl });
 }
 
@@ -5034,7 +5718,18 @@ function handleReaderTab(tab, { preserveFocus = false, replaceUrl = true } = {})
     state.readerFocus = null;
     state.readerAssetId = '';
   }
-  setReaderTab(tab, { replaceUrl });
+  const next = normalizeReaderTab(tab);
+  if (next === 'original' && state.activeEntry && !state.originalRevealed) {
+    const status = entryRewriteStatus(state.activeEntry);
+    if (status === 'pending' || status === 'failed') {
+      void revealOriginalForEntry();
+      return;
+    }
+  }
+  setReaderTab(next, { replaceUrl });
+  if (next === 'rewrite' && state.activeEntry && !state.rewrite?.body && !state.rewriteLoading && !state.rewriteGenerating) {
+    void loadRewrite(state.activeEntry);
+  }
 }
 
 function maybeGenerateRewriteAfterLoad() {
@@ -5170,12 +5865,17 @@ function renderAssetHelpfulButton(type, asset) {
   btn.title = active ? '取消有用标记' : '觉得这个资产有用';
 }
 
-function renderTranslation(translation, { loading = false } = {}) {
+function renderTranslation(translation, { loading = false, error = false } = {}) {
   const hasContent = Boolean(translation && Array.isArray(translation.content) && translation.content.length);
   state.translation = hasContent ? translation : null;
   renderReaderStatsUi();
   const list = $('#translation-list');
   const empty = $('#translation-empty');
+  empty.setAttribute('role', 'status');
+  empty.setAttribute('aria-live', 'polite');
+  empty.setAttribute('aria-busy', String(loading));
+  empty.classList.add('reading-asset-state');
+  empty.innerHTML = '<p></p>';
   const emptyText = empty.querySelector('p');
   const action = $('#reader-bilingual');
   const mode = $('#translation-view-toggle');
@@ -5194,16 +5894,19 @@ function renderTranslation(translation, { loading = false } = {}) {
   renderAssetHelpfulButton('translation', state.translation);
   if (loading) {
     empty.classList.remove('hidden');
-    if (emptyText) emptyText.textContent = '正在检查这篇文章的翻译缓存…';
+    if (emptyText) emptyText.innerHTML = '<span class="reading-asset-spinner" aria-hidden="true"></span>正在加载中文译文…';
     action.disabled = true;
-    action.textContent = '检查中…';
-    $('#translation-meta').textContent = '检查中';
+    action.textContent = '加载中…';
+    $('#translation-meta').textContent = '';
     renderAssetHelpfulButton('translation', null);
     return;
   }
   if (!hasContent) {
     empty.classList.remove('hidden');
-    if (emptyText) emptyText.textContent = '这篇文章还没有中文翻译。';
+    if (error) {
+      empty.innerHTML = '<p>中文译文加载失败，请稍后重试。</p><button type="button" id="translation-retry-load" class="ghost-btn">重新加载</button>';
+      $('#translation-retry-load').onclick = () => { if (state.activeEntry) void loadTranslation(state.activeEntry); };
+    } else if (emptyText) emptyText.textContent = '这篇文章暂未提供直译，可以阅读中文改写或原文。';
     action.disabled = false;
     action.textContent = '生成中文翻译';
     $('#translation-meta').textContent = '暂无';
@@ -5240,21 +5943,24 @@ function copyTranslationText() {
 }
 
 async function loadTranslation(entry) {
+  const requestId = state.translationRequestId = (state.translationRequestId || 0) + 1;
+  const current = () => state.activeEntry?.id === entry.id && state.translationRequestId === requestId;
   state.translationLoading = true;
   renderTranslation(null, { loading: true });
   try {
     const assetId = state.readerFocus === 'translation' ? state.readerAssetId : '';
     const query = assetId ? `?assetId=${encodeURIComponent(assetId)}` : '';
     const data = await api(`/api/entry/${entry.id}/translation${query}`);
-    if (state.activeEntry?.id !== entry.id) return;
+    if (!current()) return;
     renderTranslation(data.translation);
     if (data.translation && Array.isArray(data.translation.content) && data.translation.content.length) {
       updateEntryAssets(entry.id, entryAssetHelpfulPatch('translation', data.translation), { rerenderList: false });
       renderList();
     }
   } catch {
-    renderTranslation(null);
+    if (current()) renderTranslation(null, { error: true });
   } finally {
+    if (!current()) return;
     state.translationLoading = false;
     if (state.pendingTranslationGenerate && state.activeEntry?.id === entry.id && state.readerTab === 'translation' && !state.translation) {
       state.pendingTranslationGenerate = false;
@@ -5272,8 +5978,81 @@ function rewriteMetaText(rewrite) {
   ].filter(Boolean).join(' · ');
 }
 
-function renderRewrite(rewrite) {
+function restoreRewriteEmptyCopy() {
+  const empty = $('#rewrite-empty');
+  if (!empty) return;
+  empty.innerHTML = '';
+}
+
+function renderRewriteAvailabilityPlaceholder(entry = state.activeEntry, status = '', reason = '') {
+  const empty = $('#rewrite-empty');
+  if (!empty) return false;
+  if (!status) {
+    const known = entryRewriteStatus(entry);
+    status = known === 'pending' ? 'queued' : known === 'failed' ? 'failed' : 'loading';
+  }
+  const copy = {
+    loading: ['正在加载中文内容…', '', true],
+    queued: ['中文内容正在排队处理…', '完成后会自动显示，也可以先阅读原文。', true],
+    processing: ['正在生成中文内容…', '完成后会自动显示，也可以先阅读原文。', true],
+    retrying: ['中文内容正在重试生成…', '完成后会自动显示，也可以先阅读原文。', true],
+    waiting: ['中文内容仍在后台处理中', '可以先阅读原文，稍后查看处理结果。', false],
+    not_ready: ['中文内容尚未就绪', '后台会自动补上，可以先阅读原文。', false],
+    unavailable: ['这篇文章暂未提供中文内容', '可以先阅读原文。', false],
+    failed: ['中文内容暂时无法生成', '可以先阅读原文，稍后再试。', false],
+    error: ['中文内容加载失败', '请检查网络后重试，也可以先阅读原文。', false],
+  }[status] || ['中文内容尚未就绪', '可以先阅读原文，稍后再试。', false];
+  const [label, defaultHint, busy] = copy;
+  // Skips carry a reader-facing reason (e.g. the article is too short); model
+  // errors on failures stay in the server log.
+  const hint = reason && status === 'unavailable' ? `${reason}。可以先阅读原文。` : defaultHint;
+  empty.classList.add('reading-asset-state');
+  empty.setAttribute('role', 'status');
+  empty.setAttribute('aria-live', 'polite');
+  empty.setAttribute('aria-busy', String(busy));
+  empty.innerHTML = `
+    <p class="reading-asset-label">${busy ? '<span class="reading-asset-spinner" aria-hidden="true"></span>' : ''}${escapeHtml(label)}</p>
+    ${hint ? `<p class="rewrite-pending-hint">${escapeHtml(hint)}</p>` : ''}
+    ${status === 'loading' ? '<div class="reader-skeleton" aria-hidden="true"><span></span><span></span><span></span><span></span></div>' : ''}
+    <div class="reading-asset-actions">
+      ${!busy ? '<button type="button" id="rewrite-retry-load" class="ghost-btn">重新加载</button>' : ''}
+      <button type="button" id="rewrite-view-original" class="rewrite-view-original">阅读原文</button>
+    </div>
+  `;
+  empty.classList.remove('hidden');
+  const btn = $('#rewrite-view-original');
+  if (btn) btn.onclick = () => { void revealOriginalForEntry(); };
+  const retry = $('#rewrite-retry-load');
+  if (retry) retry.onclick = () => { if (state.activeEntry) void loadRewrite(state.activeEntry); };
+  return true;
+}
+
+async function revealOriginalForEntry() {
+  const entry = state.activeEntry;
+  if (!entry) return;
+  state.originalRevealed = true;
+  restoreRewriteEmptyCopy();
+  setReaderTab('original');
+  let content = contentCache.get(entry.id) || entry.content;
+  if (!content) {
+    $('#reader-content').innerHTML = '<p style="color:var(--text-2)">加载内容中…</p>';
+    try {
+      const data = await api(`/api/entry/${entry.id}`);
+      if (state.activeEntry?.id !== entry.id) return;
+      if (data.entry) state.activeEntry = { ...state.activeEntry, ...data.entry };
+      content = data.entry && data.entry.content;
+      contentCache.set(entry.id, content || '');
+    } catch { /* fall through to summary */ }
+    if (state.activeEntry?.id !== entry.id) return;
+  }
+  renderOriginalContent(state.activeEntry || entry, content);
+  updateFetchOriginalButton(state.activeEntry || entry);
+}
+
+function renderRewrite(rewrite, { status = rewrite?.body?.trim() ? 'ready' : 'not_ready', reason = '' } = {}) {
+  if (!rewrite?.body?.trim()) rewrite = null;
   state.rewrite = rewrite || null;
+  state.rewriteLoadStatus = status;
   const copyTextForEntry = rewriteUiCopy();
   updateRewriteUiLabels();
   renderReaderStatsUi();
@@ -5286,8 +6065,14 @@ function renderRewrite(rewrite) {
   copy.classList.toggle('hidden', !rewrite || !rewrite.body);
   copy.disabled = !rewrite || !rewrite.body;
   renderAssetHelpfulButton('rewrite', state.rewrite);
+  // Readers get the Chinese version automatically; regenerating stays an admin tool.
+  const busy = ['loading', 'queued', 'processing', 'retrying'].includes(status);
+  if (action) {
+    action.classList.toggle('hidden', busy || (Boolean(rewrite && rewrite.body) && !isAdmin()));
+    action.disabled = busy || Boolean(state.rewriteGenerating);
+  }
   if (!rewrite || !rewrite.body) {
-    empty.classList.remove('hidden');
+    renderRewriteAvailabilityPlaceholder(state.activeEntry, status, reason);
     if (meta) {
       meta.textContent = '';
       meta.classList.add('hidden');
@@ -5300,6 +6085,7 @@ function renderRewrite(rewrite) {
     return;
   }
   empty.classList.add('hidden');
+  empty.setAttribute('aria-busy', 'false');
   const metaText = rewriteMetaText(rewrite);
   if (action) {
     action.textContent = rewrite.stale ? copyTextForEntry.stale : copyTextForEntry.redo;
@@ -5322,24 +6108,42 @@ function copyRewriteText() {
   copyText(state.rewrite && state.rewrite.body, rewriteUiCopy().copied);
 }
 
-async function loadRewrite(entry) {
+async function loadRewrite(entry, { poll = false, startedAt = Date.now(), readingTask = null } = {}) {
+  const requestId = state.rewriteRequestId = (state.rewriteRequestId || 0) + 1;
+  clearTimeout(state.rewritePollTimer);
+  const assetId = state.readerFocus === 'rewrite' ? state.readerAssetId : '';
+  const current = () => state.activeEntry?.id === entry.id && state.rewriteRequestId === requestId;
   state.rewriteLoading = true;
-  renderRewrite(null);
   try {
-    const assetId = state.readerFocus === 'rewrite' ? state.readerAssetId : '';
+    if (!poll) renderRewrite(null, { status: 'loading' });
     const query = assetId ? `?assetId=${encodeURIComponent(assetId)}` : '';
-    const data = await api(`/api/entry/${entry.id}/rewrite${query}`);
-    if (state.activeEntry?.id !== entry.id) return;
-    renderRewrite(data.rewrite);
-    if (data.rewrite && data.rewrite.body) {
+    const reading = readingTask ? await readingTask : null;
+    const bundled = reading && Object.prototype.hasOwnProperty.call(reading, 'rewrite') && (reading.rewriteAssetId || '') === assetId;
+    const data = bundled ? { rewrite: reading.rewrite, ...reading.readingState?.rewrite } : await api(`/api/entry/${entry.id}/rewrite${query}`);
+    if (!current()) return;
+    const status = data.rewrite?.body?.trim() ? 'ready' : data.status || 'not_ready';
+    renderRewrite(data.rewrite, { status, reason: String(data.reason || '').replace(/[。.]+$/, '') });
+    if (data.rewrite?.body?.trim()) {
+      // Readiness is retained even when the original list used a compact payload.
+      state.activeEntry = { ...state.activeEntry, rewriteReady: true, rewriteStatus: 'ready' };
       updateEntryAssets(entry.id, entryAssetHelpfulPatch('rewrite', data.rewrite), { rerenderList: false });
       renderList();
+    } else if (!assetId && ['queued', 'processing', 'retrying', 'not_ready'].includes(status) && data.retryAfterMs > 0) {
+      const delay = Math.min(15000, Math.max(3000, Number(data.retryAfterMs) || 5000));
+      state.rewritePollTimer = setTimeout(() => {
+        if (!current()) return;
+        const exhausted = Date.now() - startedAt >= 90000;
+        if (exhausted || document.hidden || state.readerTab !== 'rewrite') {
+          if (status !== 'not_ready') renderRewrite(null, { status: 'waiting' });
+          return;
+        }
+        return loadRewrite(entry, { poll: true, startedAt });
+      }, delay);
     }
   } catch {
-    renderRewrite(null);
+    if (current()) renderRewrite(null, { status: 'error' });
   } finally {
-    state.rewriteLoading = false;
-    if (state.activeEntry?.id === entry.id) maybeGenerateRewriteAfterLoad(entry);
+    if (current()) state.rewriteLoading = false;
   }
 }
 
@@ -5389,9 +6193,15 @@ async function generateTranslation({ force = false } = {}) {
   }
   if (state.translationGenerating) return;
   if (!requireAuth('login')) return;
+  const requestId = state.translationRequestId = (state.translationRequestId || 0) + 1;
+  const current = () => state.activeEntry?.id === entry.id && state.translationRequestId === requestId;
   state.readerAssetId = '';
   setReaderTab('translation');
   state.translationGenerating = true;
+  if (!state.translation) {
+    renderTranslation(null, { loading: true });
+    $('#translation-empty p').innerHTML = '<span class="reading-asset-spinner" aria-hidden="true"></span>正在生成中文译文…';
+  }
   btn.disabled = true;
   btn.textContent = '翻译中…';
   try {
@@ -5401,21 +6211,23 @@ async function generateTranslation({ force = false } = {}) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ force }),
     });
-    if (state.activeEntry?.id !== entry.id) return;
+    if (!current()) return;
     if (data.entry) applyServerEntryUpdate(data.entry);
     renderTranslation(data.translation);
     if (data.translation && Array.isArray(data.translation.content) && data.translation.content.length) {
       updateEntryAssets(entry.id, entryAssetHelpfulPatch('translation', data.translation), { rerenderList: false });
       renderList();
     }
-    setReaderTab('translation');
     toast(data.originalFetched ? '已获取原文并保存双语翻译' : data.cached ? '已显示缓存翻译' : '双语翻译已保存');
   } catch (err) {
+    if (!current()) return;
+    if (!state.translation) renderTranslation(null, { error: true });
     if (/API Key|未配置|Authentication|authentication|invalid_request_error|401/i.test(err.message)) {
       openAiConfigModal('translation', 'translation');
     }
     toast('翻译失败: ' + err.message, 5000);
   } finally {
+    if (!current()) return;
     state.translationGenerating = false;
     btn.disabled = false;
     if (!state.translation) btn.textContent = '生成中文翻译';
@@ -5433,9 +6245,14 @@ async function generateRewrite({ force = false } = {}) {
   }
   if (state.rewriteGenerating) return;
   if (!requireAuth('login')) return;
+  const requestId = state.rewriteRequestId = (state.rewriteRequestId || 0) + 1;
+  const current = () => state.activeEntry?.id === entry.id && state.rewriteRequestId === requestId;
+  clearTimeout(state.rewritePollTimer);
+  state.rewriteLoading = false;
   state.readerAssetId = '';
   setReaderTab('rewrite');
   state.rewriteGenerating = true;
+  if (!state.rewrite?.body) renderRewrite(null, { status: 'processing' });
   btn.disabled = true;
   btn.textContent = rewriteUiCopy(entry).generating;
   try {
@@ -5445,22 +6262,24 @@ async function generateRewrite({ force = false } = {}) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ force }),
     });
-    if (state.activeEntry?.id !== entry.id) return;
+    if (!current()) return;
     if (data.entry) applyServerEntryUpdate(data.entry);
     renderRewrite(data.rewrite);
     if (data.rewrite && data.rewrite.body) {
       updateEntryAssets(entry.id, entryAssetHelpfulPatch('rewrite', data.rewrite), { rerenderList: false });
       renderList();
     }
-    setReaderTab('rewrite');
     const copyTextForEntry = rewriteUiCopy(state.activeEntry || entry);
     toast(data.originalFetched ? copyTextForEntry.fetched : data.cached ? copyTextForEntry.cached : copyTextForEntry.saved);
   } catch (err) {
+    if (!current()) return;
+    if (!state.rewrite?.body) renderRewrite(null, { status: 'failed' });
     if (/API Key|未配置|Authentication|authentication|invalid_request_error|401/i.test(err.message)) {
       openAiConfigModal('rewrite', 'rewrite');
     }
     toast(rewriteUiCopy(entry).failedPrefix + err.message, 5000);
   } finally {
+    if (!current()) return;
     state.rewriteGenerating = false;
     btn.disabled = false;
     const copyTextForEntry = rewriteUiCopy(state.activeEntry || entry);
@@ -5478,6 +6297,7 @@ async function fetchOriginalContent() {
   }
   state.fetchingOriginal = true;
   updateFetchOriginalButton(entry);
+  state.originalRevealed = true;
   setReaderTab('original');
   $('#reader-content').innerHTML = '<p style="color:var(--text-2)">正在获取原文内容…</p>';
   try {
@@ -7412,6 +8232,7 @@ function renderAgentMessages(extraPending = false, { preserveScroll = false } = 
   if (!el) return;
   renderAgentContextStrip();
   const thread = state.agentMessages || [];
+  $('#agent-side-panel')?.classList.toggle('agent-has-thread', Boolean(thread.length || extraPending));
   const hadPendingChatMessage = Boolean(state.pendingChatMessageId);
   const previousScrollTop = el.scrollTop;
   el.innerHTML = '';
@@ -7428,7 +8249,8 @@ function renderAgentMessages(extraPending = false, { preserveScroll = false } = 
   const messages = extraPending ? [...thread, { role: 'assistant', content: '思考中…', pending: true }] : thread;
   for (const message of messages) {
     const row = document.createElement('div');
-    row.className = `agent-msg ${message.role}${message.pending ? ' pending' : ''}`;
+    const mine = message.role === 'user' && (message.canDelete || !message.id || (state.me && message.contributorId === state.me.id));
+    row.className = `agent-msg ${message.role}${message.pending ? ' pending' : ''}${message.error ? ' error' : ''}${mine ? ' mine' : ''}`;
     if (message.id) row.id = `chat-${message.id}`;
     const head = document.createElement('div');
     head.className = 'agent-msg-head';
@@ -7455,32 +8277,24 @@ function renderAgentMessages(extraPending = false, { preserveScroll = false } = 
     if (!message.pending) {
       const actions = document.createElement('div');
       actions.className = 'agent-msg-actions';
-      if (message.id) {
-        const link = document.createElement('button');
-        link.type = 'button';
-        link.className = 'agent-msg-action agent-msg-link';
-        link.title = '复制这条对话链接';
-        link.setAttribute('aria-label', '复制这条对话链接');
-        setElementIcon(link, 'hash');
-        link.onclick = () => copyAgentMessageLink(message.id);
-        actions.appendChild(link);
-      }
       const copy = document.createElement('button');
       copy.type = 'button';
       copy.className = 'agent-msg-action agent-msg-copy';
       copy.title = '复制这条消息';
       copy.setAttribute('aria-label', '复制这条消息');
-      setElementIcon(copy, 'copy');
+      setButtonIconLabel(copy, 'copy', '复制');
       copy.onclick = () => copyText(message.content, '消息已复制');
       actions.appendChild(copy);
-      const draft = document.createElement('button');
-      draft.type = 'button';
-      draft.className = 'agent-msg-action agent-msg-draft';
-      draft.title = '放入人工点评';
-      draft.setAttribute('aria-label', '放入人工点评');
-      setElementIcon(draft, 'message-circle-plus');
-      draft.onclick = () => draftCommentFromAgentMessage(message);
-      actions.appendChild(draft);
+      if (message.error && message.retryText) {
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'agent-msg-action agent-msg-retry';
+        retry.title = '重新发送这个问题';
+        retry.setAttribute('aria-label', '重新发送这个问题');
+        setButtonIconLabel(retry, 'rotate-ccw', '重试');
+        retry.onclick = () => retryAgentMessage(message);
+        actions.appendChild(retry);
+      }
       if (message.canDelete && message.id) {
         const del = document.createElement('button');
         del.type = 'button';
@@ -7495,23 +8309,11 @@ function renderAgentMessages(extraPending = false, { preserveScroll = false } = 
     }
     const body = document.createElement('div');
     body.className = 'agent-msg-body';
-    body.innerHTML = renderMarkdownLite(message.content);
+    body.innerHTML = message.pending
+      ? '<span class="agent-typing" role="status" aria-label="正在生成"><i></i><i></i><i></i></span>'
+      : renderMarkdownLite(message.content);
     row.appendChild(head);
     row.appendChild(body);
-    if (!message.pending && message.id) {
-      const feedback = document.createElement('div');
-      feedback.className = 'agent-msg-feedback';
-      const helpfulCount = Number(message.helpfulCount || 0);
-      const helpful = document.createElement('button');
-      helpful.type = 'button';
-      helpful.className = `agent-msg-helpful${message.helpfulByMe ? ' active' : ''}`;
-      helpful.setAttribute('aria-pressed', message.helpfulByMe ? 'true' : 'false');
-      helpful.title = message.helpfulByMe ? '取消有用标记' : '标记这条对话有用';
-      helpful.textContent = `有用${helpfulCount ? ` ${helpfulCount}` : ''}`;
-      helpful.onclick = () => toggleAgentHelpful(message.id);
-      feedback.appendChild(helpful);
-      footer.appendChild(feedback);
-    }
     if (footer.childElementCount) row.appendChild(footer);
     frag.appendChild(row);
   }
@@ -7667,17 +8469,16 @@ function updateAgentControls() {
   const send = $('#agent-send');
   const panel = $('#agent-side-panel');
   if (!input || !send) return;
-  if (!hasEntry) input.placeholder = '问当前文章…';
-  else if (!hasUser) input.placeholder = '登录后围绕当前文章对话';
-  else if (!hasKey) input.placeholder = '填写 API Key 后提问';
-  else input.placeholder = '问当前文章…';
+  if (!hasEntry) input.placeholder = '问问这篇文章…';
+  else if (!hasUser) input.placeholder = '登录后，就能问这篇文章';
+  else if (!hasKey) input.placeholder = '在设置里填好 API Key，就能提问';
+  else input.placeholder = '问问这篇文章…';
   input.disabled = !hasEntry || !hasUser || !hasKey || state.agentBusy;
-  send.disabled = !hasEntry || !hasUser || !hasKey || state.agentBusy || !input.value.trim();
-  setElementIcon(send, state.agentBusy ? 'loader-circle' : 'send', {
-    className: state.agentBusy ? 'app-icon app-icon-spin' : 'app-icon',
-  });
-  send.title = state.agentBusy ? '正在生成' : '发送';
-  send.setAttribute('aria-label', state.agentBusy ? '正在生成' : '发送');
+  send.disabled = state.agentBusy ? false : (!hasEntry || !hasUser || !hasKey || !input.value.trim());
+  setElementIcon(send, state.agentBusy ? 'square' : 'send', { className: 'app-icon' });
+  send.title = state.agentBusy ? '停止生成' : '发送';
+  send.setAttribute('aria-label', state.agentBusy ? '停止生成' : '发送');
+  send.classList.toggle('is-stop', Boolean(state.agentBusy));
   if (panel) panel.classList.toggle('agent-busy', Boolean(state.agentBusy));
   $$('.agent-prompt').forEach(btn => { btn.disabled = !hasEntry || !hasUser || !hasKey || state.agentBusy; });
   const copyThread = $('#agent-copy-thread');
@@ -7732,7 +8533,11 @@ async function sendAgentMessage(text) {
   const outboundContent = withAgentContext(content);
   state.agentMessages.push({ role: 'user', author: state.me.displayName, content: outboundContent, createdAt: Date.now() });
   $('#agent-input').value = '';
+  $('#agent-input').style.height = '';
+  $('#agent-count').textContent = '';
   state.agentBusy = true;
+  const controller = new AbortController();
+  state.agentAbort = controller;
   renderAgentMessages(true);
   updateAgentControls();
 
@@ -7742,21 +8547,65 @@ async function sendAgentMessage(text) {
       aiConfig: agentConfig,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: [{ role: 'user', content: outboundContent }] }),
+      signal: controller.signal,
+      timeoutMs: 120000,
     });
     if (state.activeEntry?.id === entry.id) {
       state.agentMessages = [...state.agentMessages.filter(m => !m.pending), data.assistantMessage || { role: 'assistant', author: 'DeepSeek', content: data.answer }];
       await loadAgentMessages(entry);
     }
   } catch (err) {
-    state.agentMessages.push({ role: 'assistant', author: '系统', content: `对话失败：${err.message}` });
-    if (state.activeEntry?.id === entry.id) renderAgentMessages();
+    if (err && err.name === 'AbortError') {
+      // Stopped by the reader: drop the unsent question from the thread and give the text back.
+      state.agentMessages = state.agentMessages.filter(m => !m.pending && m.content !== outboundContent);
+      if (state.activeEntry?.id === entry.id) {
+        $('#agent-input').value = content;
+        renderAgentMessages();
+      }
+    } else {
+      state.agentMessages.push({ role: 'assistant', author: '系统', content: `对话失败：${err.message}`, error: true, retryText: content });
+      if (state.activeEntry?.id === entry.id) renderAgentMessages();
+    }
   } finally {
+    if (state.agentAbort === controller) state.agentAbort = null;
     state.agentBusy = false;
     updateAgentControls();
   }
 }
 
-async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentId = '', annotationId = '', chatMessageId = '', updateUrl = true, replaceUrl = false } = {}) {
+function stopAgentMessage() {
+  if (state.agentAbort) state.agentAbort.abort();
+}
+
+function retryAgentMessage(failed) {
+  if (!failed || !failed.retryText || state.agentBusy) return;
+  const index = state.agentMessages.indexOf(failed);
+  if (index < 0) return;
+  // Remove the failure notice and the question that produced it, then ask again.
+  const previous = state.agentMessages[index - 1];
+  state.agentMessages.splice(previous && previous.role === 'user' && !previous.id ? index - 1 : index, previous && previous.role === 'user' && !previous.id ? 2 : 1);
+  sendAgentMessage(failed.retryText);
+}
+
+function loadEntryExtrasAfterReading(entry, readingTask, openId) {
+  const load = () => {
+    if (state.activeEntry?.id !== entry.id || state.articleOpenId !== openId) return;
+    // Writes can wait on SQLite while a refresh worker holds its writer lock.
+    // Do not let those writes or supplementary reads delay delivery of the body.
+    recordEntryView(entry.id);
+    syncEntryState(entry.id, { read: true, viewed: true });
+    loadTranslation(entry);
+    loadAnnotations(entry);
+    loadComments(entry);
+    loadAgentMessages(entry);
+  };
+  void readingTask.then(load, load);
+}
+
+async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentId = '', annotationId = '', chatMessageId = '', updateUrl = true, replaceUrl = false, readingPayload = null } = {}) {
+  const openId = state.articleOpenId = (state.articleOpenId || 0) + 1;
+  clearTimeout(state.rewritePollTimer);
+  setPodcastMode(false);
   setWorkspacePage('');
   const previousEntryId = state.activeEntry?.id || '';
   if (previousEntryId && previousEntryId !== e.id) {
@@ -7764,8 +8613,6 @@ async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentI
     state.activeAnnotationId = '';
   }
   state.activeEntry = e;
-  let content = e.content || contentCache.get(e.id);
-  const contentRequest = content ? null : api(`/api/entry/${e.id}`);
   const requestedFocus = ASSET_FILTER_TYPES.includes(focus) ? focus : null;
   const requestedAssetId = (requestedFocus === 'translation' || requestedFocus === 'rewrite')
     ? String(aiAssetId || '').trim()
@@ -7776,10 +8623,10 @@ async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentI
     ? 'translation'
     : requestedFocus === 'rewrite'
       ? 'rewrite'
-      : normalizeReaderOpenTab(tab);
+      : !tab && entryRewriteStatus(e) !== 'native'
+        ? 'rewrite'
+        : normalizeReaderOpenTab(tab);
   state.read.add(e.id);
-  recordEntryView(e.id);
-  syncEntryState(e.id, { read: true, viewed: true });
   persist();
 
   const src = sourceById(e.sourceId);
@@ -7789,6 +8636,7 @@ async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentI
   $('#reader-source').innerHTML = `${src ? faviconHtml(src.siteUrl, src.name, 14) : ''}<span>${escapeHtml(src ? src.name : '')}</span>`;
   renderTitle(e);
   updateRewriteUiLabels(e);
+  restoreRewriteEmptyCopy();
   document.title = readerRouteTitle(e, requestedFocus);
   const publishedTime = friendlyDateTime(e.publishedTs || Date.parse(e.published || ''));
   $('#reader-meta').textContent = [e.author, publishedTime].filter(Boolean).join(' · ');
@@ -7811,6 +8659,7 @@ async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentI
   state.rewriteLoading = false;
   state.rewriteGenerating = false;
   state.pendingRewriteGenerate = false;
+  state.originalRevealed = false;
   state.readerFocus = requestedFocus;
   state.readerAssetId = requestedAssetId;
   state.readerAssetsExpanded = false;
@@ -7830,14 +8679,50 @@ async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentI
   renderReaderAssetSummary(e);
   updateFetchOriginalButton(e);
   setReaderTab(requestedTab, { syncUrl: false });
-  loadTranslation(e);
-  loadRewrite(e);
-  loadAnnotations(e);
-  loadComments(e);
-  loadAgentMessages(e);
+  if (shouldHoldOriginal(e)) renderRewriteAvailabilityPlaceholder(e);
+  // One authoritative response provides both original and ready Chinese text.
+  // A deep link already received this data with its HTML; no second body request.
+  const readingTask = readingPayload ? Promise.resolve(readingPayload) : readEntryBundle(e.id);
+  loadRewrite(e, { readingTask });
+  loadEntryExtrasAfterReading(e, readingTask, openId);
   if (updateUrl) syncReaderUrl({ replace: replaceUrl, commentId, annotationId, chatMessageId });
 
-  $('#reader-audio').innerHTML = e.audio ? `<audio controls preload="none" src="${escapeHtml(e.audio.url)}"></audio>` : '';
+  let youtubeVideoId = '';
+  if (e.sourceId === 'allin' || e.sourceId === 'joerogan') {
+    try {
+      const videoUrl = new URL(e.link);
+      const id = videoUrl.searchParams.get('v') || '';
+      if (videoUrl.protocol === 'https:' && ['www.youtube.com', 'youtube.com'].includes(videoUrl.hostname) &&
+          videoUrl.pathname === '/watch' && /^[A-Za-z0-9_-]{11}$/.test(id)) youtubeVideoId = id;
+    } catch { /* an invalid source link must not create an embed */ }
+  }
+  // A Bilibili video link plays in Bilibili's own embed; its page and tracking parameters are dropped.
+  let bilibiliId = '', bilibiliPage = 1;
+  try {
+    const videoUrl = new URL(e.link);
+    const match = videoUrl.pathname.match(/^\/video\/(BV[0-9A-Za-z]{10})\/?$/);
+    if (videoUrl.protocol === 'https:' && ['www.bilibili.com', 'bilibili.com', 'm.bilibili.com'].includes(videoUrl.hostname) && match) {
+      bilibiliId = match[1];
+      const part = parseInt(videoUrl.searchParams.get('p') || '1', 10);
+      bilibiliPage = part > 0 ? part : 1;
+    }
+  } catch { /* an invalid source link must not create an embed */ }
+  $('#reader-audio').innerHTML = youtubeVideoId
+    ? `<div class="reader-youtube"><iframe src="https://www.youtube-nocookie.com/embed/${youtubeVideoId}" title="${escapeHtml(e.title)} · YouTube 视频" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div><a class="reader-youtube-link" href="https://www.youtube.com/watch?v=${youtubeVideoId}" target="_blank" rel="noopener noreferrer">无法内嵌播放？在 YouTube 打开</a>`
+    : bilibiliId ? `<div class="reader-youtube"><iframe src="https://player.bilibili.com/player.html?isOutside=true&bvid=${bilibiliId}&p=${bilibiliPage}&autoplay=0&high_quality=1&danmaku=0" title="${escapeHtml(e.title)} · 哔哩哔哩视频" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" scrolling="no" frameborder="0" allowfullscreen></iframe></div><a class="reader-youtube-link" href="https://www.bilibili.com/video/${bilibiliId}/${bilibiliPage > 1 ? `?p=${bilibiliPage}` : ''}" target="_blank" rel="noopener noreferrer">无法内嵌播放？在 B 站打开</a>`
+    : e.audio ? `<audio controls preload="none" src="${escapeHtml(e.audio.url)}"></audio>` : '';
+  const podcastNotesLink = $('#reader-podcast-notes');
+  if (podcastNotesLink) {
+    const youtubePodcast = e.sourceId === 'allin' || e.sourceId === 'joerogan';
+    const showPrivateNotes = Boolean(isAdmin() && (youtubePodcast || ['zhangxiaojun', '42zhangjing', 'latetalk', 'bannatie', 'nexttoken', 'crossing', 'aialchemy', '35huan', 'zhixing', 'mianji'].includes(e.sourceId)));
+    podcastNotesLink.classList.toggle('hidden', !showPrivateNotes);
+    if (showPrivateNotes) {
+      podcastNotesLink.href = `/${youtubePodcast ? 'youtube-notes' : 'podcast-notes'}/${encodeURIComponent(e.id)}`;
+      const label = youtubePodcast ? '查看私人字幕或播放视频（仅管理员）' : '阅读私人播客摘要与逐字稿（仅管理员）';
+      podcastNotesLink.title = label;
+      podcastNotesLink.setAttribute('aria-label', label);
+    }
+  }
   $('#reader-pane').scrollTop = 0;
   document.getElementById('app').classList.add('reading');
   normalizeReaderWorkbenchLayout();
@@ -7848,11 +8733,13 @@ async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentI
 
   renderEntryStateUi();
 
-  // Start this request before auxiliary assets so HTTP/1.1 connections prioritize readable content.
-  if (contentRequest) {
-    $('#reader-content').innerHTML = '<p style="color:var(--text-2)">加载内容中…</p>';
+  // content is loaded lazily — the list API omits it to stay lightweight
+  let content = e.content || contentCache.get(e.id);
+  if (!content) {
+    $('#reader-content').innerHTML = '<div class="reader-skeleton" role="status" aria-label="正在加载正文"><span></span><span></span><span></span><span></span></div>';
     try {
-      const data = await contentRequest;
+      // UI-MOBILE: reuse an in-flight prefetch (pointer-down / hover) when there is one.
+      const data = await readingTask;
       if (data.entry && state.activeEntry?.id === e.id) {
         state.activeEntry = { ...state.activeEntry, ...data.entry };
       }
@@ -7861,12 +8748,15 @@ async function openEntry(e, { tab = null, focus = null, aiAssetId = '', commentI
     } catch { /* fall through to summary */ }
     if (state.activeEntry?.id !== e.id) return; // user moved on
   }
-  renderOriginalContent(state.activeEntry || e, content);
-  updateFetchOriginalButton(state.activeEntry || e);
+  const loadedEntry = state.activeEntry || e;
+  if (!shouldHoldOriginal(loadedEntry)) renderOriginalContent(loadedEntry, content);
+  void loadPodscribeOriginal(loadedEntry);
+  updateFetchOriginalButton(loadedEntry);
   if (state.translation && state.activeEntry?.id === e.id) renderTranslation(state.translation);
 }
 
 function closeReaderFromRoute({ rerenderList = true } = {}) {
+  clearTimeout(state.rewritePollTimer);
   setWorkspacePage('');
   state.activeEntry = null;
   state.agentMessages = [];
@@ -7892,6 +8782,8 @@ function closeReaderFromRoute({ rerenderList = true } = {}) {
   state.pendingChatMessageId = '';
   state.fetchingOriginal = false;
   state.readerTab = 'original';
+  state.originalRevealed = false;
+  restoreRewriteEmptyCopy();
   $('#reader').classList.add('hidden');
   $('#reader-empty').classList.remove('hidden');
   renderAdminEntryControls();
@@ -7899,24 +8791,33 @@ function closeReaderFromRoute({ rerenderList = true } = {}) {
   applyReaderPrefs();
   document.title = 'QMReader · RSS 阅读器';
   if (rerenderList) renderList();
+  restoreEntryListScroll();
   renderAgent();
 }
 
 async function openEntryById(entryId, { tab = null, focus = null, aiAssetId = '', commentId = '', annotationId = '', chatMessageId = '', updateUrl = false, replaceUrl = true } = {}) {
   const id = String(entryId || '').trim();
   if (!id) return false;
-  let entry = state.entries.find(item => item.id === id);
+  let readingPayload = takeArticleBootstrap(id);
+  let entry = readingPayload?.entry || state.entries.find(item => item.id === id);
   if (!entry) {
-    const data = await api(`/api/entry/${encodeURIComponent(id)}`);
-    entry = data.entry;
+    readingPayload = await readEntryBundle(id);
+    entry = readingPayload.entry;
   }
   if (!entry) return false;
-  await openEntry(entry, { tab, focus, aiAssetId, commentId, annotationId, chatMessageId, updateUrl, replaceUrl });
+  await openEntry(entry, { tab, focus, aiAssetId, commentId, annotationId, chatMessageId, updateUrl, replaceUrl, readingPayload });
   return true;
 }
 
 async function openEntryFromUrl({ reuseLoadedCollections = false } = {}) {
   const route = routeStateFromUrl();
+  if (route.podscribe) {
+    setPodcastMode(true);
+    document.title = '播客文稿 · QMReader';
+    window.qmPodscribe?.restoreFromUrl();
+    return true;
+  }
+  setPodcastMode(false);
   if (route.admin) {
     state.view = 'all';
     state.filterSource = null;
@@ -8014,6 +8915,7 @@ async function openEntryFromUrl({ reuseLoadedCollections = false } = {}) {
 
 /* ---------- Navigation ---------- */
 async function reload({ keepReader = false, clearUrl = true } = {}) {
+  setPodcastMode(false);
   const listUpdating = state.view !== 'contributors';
   const reloadSeq = listUpdating ? ++listReloadSeq : 0;
   if (listUpdating) setEntryListUpdating(true);
@@ -8021,11 +8923,13 @@ async function reload({ keepReader = false, clearUrl = true } = {}) {
     if (state.view === 'contributors') await loadContributors();
     else await loadEntries();
   } finally {
+    // 若已有更新的 reload 在途，updating 状态交给它收尾，避免提前清除
     if (listUpdating && reloadSeq === listReloadSeq) setEntryListUpdating(false);
   }
   updateListTitle();
   renderList();
   renderSidebar();
+  if (listUpdating) restoreEntryListScroll();
   if (!keepReader) {
     setWorkspacePage('');
     state.activeEntry = null;
@@ -8050,6 +8954,7 @@ async function reload({ keepReader = false, clearUrl = true } = {}) {
     state.pendingAnnotationId = '';
     state.fetchingOriginal = false;
     state.readerTab = 'original';
+    state.originalRevealed = false;
     $('#reader').classList.add('hidden');
     $('#reader-empty').classList.remove('hidden');
     document.getElementById('app').classList.remove('reading');
@@ -8195,12 +9100,15 @@ async function refreshAll() {
       setButtons(data.refreshing ? `${data.progress.done}/${data.progress.total}` : '刷新全部', Boolean(data.refreshing));
       if (!data.refreshing) break;
     }
+    if (state.refreshing) throw new Error('仍在后台更新，请稍后查看');
     await reload({ keepReader: true });
     if (!$('#manage-modal')?.classList.contains('hidden')) renderManage();
     if (state.workspacePage === 'admin') renderAdminPage();
     toast('刷新完成');
+    return true;
   } catch (e) {
     toast('刷新失败: ' + e.message);
+    return false;
   } finally {
     setButtons('刷新全部', false);
   }
@@ -8208,8 +9116,28 @@ async function refreshAll() {
 
 async function refreshCurrentSource() {
   const source = state.filterSource ? sourceById(state.filterSource) : null;
-  if (!source) return;
+  if (state.listRefreshBusy) return;
+  if (!source) {
+    state.listRefreshBusy = true;
+    renderSourceRefreshButton();
+    setSourceRefreshStatus('正在更新', 'loading');
+    try {
+      if (state.me?.role === 'admin') {
+        if (await refreshAll() === false) throw new Error('全源更新尚未完成');
+      }
+      else await reload({ keepReader: true });
+      setSourceRefreshStatus('列表已更新', 'success', { timeout: 5200 });
+    } catch (error) {
+      setSourceRefreshStatus('更新失败', 'error', { timeout: 5200 });
+      toast('刷新失败: ' + error.message);
+    } finally {
+      state.listRefreshBusy = false;
+      renderSourceRefreshButton();
+    }
+    return;
+  }
   if (!requireAuth('login')) return;
+  state.listRefreshBusy = true;
 
   const btn = $('#source-refresh-btn');
   btn.disabled = true;
@@ -8218,7 +9146,7 @@ async function refreshCurrentSource() {
   setSourceRefreshStatus('正在检查', 'loading');
   toast(`正在检查 ${source.name} 更新…`, 2600);
   try {
-    const beforeEntries = await sourceEntriesSnapshot(source.id).catch(() => []);
+    const beforeEntries = await sourceEntriesSnapshot(source.id);
     const result = await api('/api/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -8232,11 +9160,12 @@ async function refreshCurrentSource() {
       const data = await loadSources();
       if (!data.refreshing) break;
     }
+    if (state.refreshing) throw new Error('仍在后台更新，请稍后查看');
     const latestSource = sourceById(source.id);
     if (latestSource && latestSource.status === 'error') {
       throw new Error(latestSource.error || '信息源刷新失败');
     }
-    const afterEntries = await sourceEntriesSnapshot(source.id).catch(() => []);
+    const afterEntries = await sourceEntriesSnapshot(source.id);
     const added = newEntryCount(beforeEntries, afterEntries);
     await reload({ keepReader: true });
     const doneMessage = added ? `${source.name} 新增 ${added} 篇` : `${source.name} 暂无更新`;
@@ -8246,6 +9175,7 @@ async function refreshCurrentSource() {
     setSourceRefreshStatus('检查失败', 'error', { timeout: 5200 });
     toast('刷新失败: ' + e.message, 5000);
   } finally {
+    state.listRefreshBusy = false;
     renderSourceRefreshButton();
   }
 }
@@ -8584,6 +9514,8 @@ function renderAdminSubmissionRequests() {
         <strong>${escapeHtml(request.displayName || request.author || request.email || '注册用户')}</strong>
         <span>${escapeHtml(request.email || '')} · ${escapeHtml(formatAssetTime(request.createdAt))}</span>
         <a href="${escapeHtml(request.url)}" target="_blank" rel="noopener noreferrer nofollow">${escapeHtml(request.url)}</a>
+        ${request.title ? `<p><strong>${escapeHtml(request.title)}</strong></p>` : ''}
+        ${request.markdown ? `<details><summary>查看提交的正文</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(request.markdown)}</pre></details>` : ''}
         ${request.note ? `<p>${escapeHtml(request.note)}</p>` : ''}
       </div>
       <div class="admin-review-actions">
@@ -8607,7 +9539,7 @@ async function reviewAdminSubmissionRequest(requestId, action) {
   if (action === 'approve') {
     const ok = await showConfirmDialog({
       title: '审核并收录',
-      message: `确认访问并抓取 ${request.url}？只有此操作会让服务器访问目标站。`,
+      message: request.markdown ? `确认收录 ${request.title || request.url} 的提交正文？` : `确认访问并抓取 ${request.url}？只有此操作会让服务器访问目标站。`,
       confirmText: '审核并收录',
     });
     if (!ok) return;
@@ -8838,11 +9770,6 @@ function closeAdminPage() {
   clearReaderUrl({ replace: true });
 }
 
-function getEditingAiProfile() {
-  return state.aiProfiles.find(profile => profile.id === state.editingAiProfileId)
-    || currentAiProfile();
-}
-
 function renderAiStatus() {
   const el = $('#agent-profile');
   renderSidebarAiSettings();
@@ -8862,7 +9789,7 @@ function renderAiStatus() {
 function aiProfileSelectLabel(profile) {
   const model = String(profile && profile.model || '').trim();
   const name = String(profile && profile.name || profile && profile.providerName || 'AI 配置').trim();
-  const suffix = profile && profile.apiKey ? '' : ' · 未配置';
+  const suffix = profile && (profile.apiKey || profile.oauthAccountId) ? '' : ' · 未配置';
   return `${name}${model ? ` · ${model}` : ''}${suffix}`;
 }
 
@@ -8870,7 +9797,9 @@ function renderAiProfileSelect(selector, purpose) {
   const select = $(selector);
   if (!select) return;
   const profile = aiProfileForPurpose(purpose);
-  select.innerHTML = state.aiProfiles.map(item => (
+  const configured = window.QMAiSettings ? QMAiSettings.visibleModels() : [];
+  const options = configured.length ? configured : state.aiProfiles;
+  select.innerHTML = options.map(item => (
     `<option value="${escapeHtml(item.id)}">${escapeHtml(aiProfileSelectLabel(item))}</option>`
   )).join('');
   select.value = profile.id;
@@ -8882,6 +9811,35 @@ function renderAiProfileControls() {
   renderAiProfileSelect('#translation-profile-select', 'translation');
   renderAiProfileSelect('#rewrite-profile-select', 'rewrite');
   renderAiProfileSelect('#agent-profile-select', 'agent');
+  renderAgentModelButton();
+}
+
+let agentModelPicker = null;
+
+function agentPicker() {
+  if (agentModelPicker || !window.QMAiSettings) return agentModelPicker;
+  agentModelPicker = QMAiSettings.bindChatPicker({
+    trigger: $('#agent-model-btn'),
+    pop: $('#agent-model-pop'),
+    getCurrentId: () => aiProfileForPurpose('agent').id,
+    onSelect: id => setAiProfileForPurpose('agent', id),
+    onManage: () => openAiConfigModal('settings'),
+  });
+  return agentModelPicker;
+}
+
+function renderAgentModelButton() {
+  const btn = $('#agent-model-btn');
+  if (!btn) return;
+  const profile = aiProfileForPurpose('agent');
+  const configured = Boolean(profile && profile.providerId && (profile.apiKey || profile.oauthAccountId));
+  const label = configured ? QMAiSettings.shortModelName(profile.name) : '选择模型';
+  btn.innerHTML = `<span class="agent-model-name">${escapeHtml(label)}</span><span class="agent-model-caret">${lucideIcon('chevrons-up-down')}</span>`;
+  btn.title = configured ? `${profile.name}${profile.model && profile.model !== profile.name ? `\n${profile.model}` : ''}` : '还没有可用的模型';
+  btn.classList.toggle('is-unset', !configured);
+  btn.disabled = !state.me;
+  const picker = agentPicker();
+  if (picker) picker.refresh();
 }
 
 function setAiProfileForPurpose(purpose, profileId) {
@@ -8902,136 +9860,17 @@ function aiAlertText() {
   return '';
 }
 
-function renderAiProfileList() {
-  const list = $('#ai-profile-list');
-  if (!list) return;
-  list.innerHTML = '';
-  const frag = document.createDocumentFragment();
-  for (const profile of state.aiProfiles) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'ai-profile-item' + (profile.id === state.editingAiProfileId ? ' active' : '');
-    btn.innerHTML = `
-      <span class="ai-profile-name">${escapeHtml(profile.name)}</span>
-      <span class="ai-profile-meta">${escapeHtml(profile.providerName || profile.provider)} · ${escapeHtml(profile.model || '未填模型')}</span>
-      <span class="ai-profile-key">${profile.apiKey ? escapeHtml(maskApiKey(profile.apiKey)) : '未填 API Key'}${profile.isDefault ? ' · 默认' : ''}</span>`;
-    btn.onclick = () => {
-      state.editingAiProfileId = profile.id;
-      state.activeAiProfileId = profile.id;
-      if (state.aiConfigReason === 'translation') state.translationAiProfileId = profile.id;
-      if (state.aiConfigReason === 'rewrite') state.rewriteAiProfileId = profile.id;
-      if (state.aiConfigReason === 'agent') state.agentAiProfileId = profile.id;
-      persistAiProfiles();
-      renderAiSettings();
-      updateAgentControls();
-    };
-    frag.appendChild(btn);
-  }
-  list.appendChild(frag);
-}
-
-function renderTemplateList() {
-  const el = $('#ai-template-list');
-  if (!el) return;
-  const parts = [];
-  for (const category of AI_PROVIDER_CATEGORIES) {
-    const presets = AI_PROVIDER_PRESETS.filter(preset => preset.category === category);
-    if (!presets.length) continue;
-    parts.push(`<div class="ai-template-group"><div class="ai-template-category">${escapeHtml(category)}</div><div class="ai-template-buttons">`);
-    for (const preset of presets) {
-      parts.push(`<button type="button" class="ai-template" data-preset="${escapeHtml(preset.id)}" title="${escapeHtml(preset.description)}">
-        <span>${escapeHtml(preset.name)}${preset.recommended ? ' · 推荐' : ''}</span>
-      </button>`);
-    }
-    parts.push('</div></div>');
-  }
-  parts.push(`<div class="ai-template-group"><div class="ai-template-category">自定义</div><div class="ai-template-buttons"><button type="button" class="ai-template" data-preset="custom"><span>OpenAI 兼容</span></button></div></div>`);
-  el.innerHTML = parts.join('');
-}
-
-function quickModelsForProfile(profile) {
-  const preset = AI_PROVIDER_MAP[profile.provider];
-  const models = preset && Array.isArray(preset.quickModels) ? preset.quickModels : [];
-  return [...new Set([profile.model, ...models].filter(Boolean))];
-}
-
-function renderQuickModels(models) {
-  const el = $('#ai-quick-models');
-  if (!el) return;
-  el.innerHTML = models.slice(0, 18).map(model => (
-    `<button type="button" class="ai-model-chip" data-model="${escapeHtml(model)}">${escapeHtml(model)}</button>`
-  )).join('');
-}
-
-function fillAiProfileForm(profile) {
-  $('#ai-profile-name').value = profile.name || '';
-  $('#ai-provider-id').value = profile.provider || 'custom';
-  $('#ai-provider-name').value = profile.providerName || profile.provider || '';
-  $('#ai-provider-category').value = profile.providerCategory || '';
-  $('#ai-provider-type').value = profile.providerType || 'openai_compatible';
-  $('#ai-api-key-url').value = profile.apiKeyUrl || '';
-  $('#ai-api-key').value = profile.apiKey || '';
-  $('#ai-base-url').value = profile.baseUrl || '';
-  $('#ai-model').value = profile.model || '';
-  $('#ai-temperature').value = String(clampTemperature(profile.temperature));
-  $('#ai-max-tokens').value = String(clampMaxTokens(profile.maxTokens));
-  $('#ai-default-profile').checked = Boolean(profile.isDefault);
-  const keyLink = $('#ai-key-link');
-  keyLink.href = profile.apiKeyUrl || '#';
-  keyLink.classList.toggle('hidden', !profile.apiKeyUrl);
-  $('#ai-config-note').textContent = profile.apiKey
-    ? `当前 API Key：${maskApiKey(profile.apiKey)}`
-    : 'API Key 只保存在当前浏览器，不写入服务器数据库。';
-  renderQuickModels(quickModelsForProfile(profile));
-}
-
 function renderAiSettings() {
   if (!state.aiProfiles.length) loadAiProfilesForScope();
-  if (!state.editingAiProfileId) state.editingAiProfileId = currentAiProfile().id;
   renderAiStatus();
-  renderAiProfileList();
-  renderTemplateList();
-  const profile = getEditingAiProfile();
-  if (profile) fillAiProfileForm(profile);
+  if (window.QMAiSettings) QMAiSettings.render();
   const alert = $('#ai-config-alert');
   const text = aiAlertText();
   if (alert) {
     alert.textContent = text;
     alert.classList.toggle('hidden', !text);
   }
-  $('#ai-delete-profile').disabled = state.aiProfiles.length <= 1;
   updateAgentControls();
-}
-
-function readAiProfileForm() {
-  const current = getEditingAiProfile() || createCustomProfile();
-  return normalizeProfile({
-    ...current,
-    name: $('#ai-profile-name').value.trim(),
-    provider: $('#ai-provider-id').value.trim() || 'custom',
-    providerName: $('#ai-provider-name').value.trim() || $('#ai-provider-id').value.trim() || '自定义',
-    providerType: $('#ai-provider-type').value.trim() || 'openai_compatible',
-    providerCategory: $('#ai-provider-category').value.trim(),
-    apiKeyUrl: $('#ai-api-key-url').value.trim(),
-    baseUrl: normalizeBaseUrl($('#ai-base-url').value),
-    model: $('#ai-model').value.trim(),
-    temperature: clampTemperature($('#ai-temperature').value),
-    maxTokens: clampMaxTokens($('#ai-max-tokens').value),
-    apiKey: $('#ai-api-key').value.trim(),
-    isDefault: $('#ai-default-profile').checked,
-    updatedAt: Date.now(),
-  });
-}
-
-function applyAiPreset(presetId) {
-  const current = getEditingAiProfile() || createCustomProfile();
-  const profile = presetId === 'custom'
-    ? createCustomProfile({ id: current.id, apiKey: current.apiKey, isDefault: current.isDefault })
-    : createProfileFromPreset(presetId, { id: current.id, apiKey: current.apiKey, isDefault: current.isDefault });
-  fillAiProfileForm(profile);
-  $('#ai-config-note').textContent = presetId === 'custom'
-    ? '自定义服务需要兼容 OpenAI Chat Completions 协议。'
-    : (AI_PROVIDER_MAP[presetId]?.description || '');
 }
 
 function runPendingAiAction() {
@@ -9044,68 +9883,16 @@ function runPendingAiAction() {
   if (action === 'agent' && text) setTimeout(() => sendAgentMessage(text), 0);
 }
 
-function saveAiProfileFromForm({ silent = false } = {}) {
-  const profile = readAiProfileForm();
-  if (!profile.name || !profile.baseUrl || !profile.model) {
-    toast('请填写配置名称、Base URL 和模型');
-    return null;
-  }
-
-  const exists = state.aiProfiles.some(item => item.id === profile.id);
-  let nextProfiles = exists
-    ? state.aiProfiles.map(item => (item.id === profile.id ? profile : item))
-    : [...state.aiProfiles, profile];
-  if (profile.isDefault || !nextProfiles.some(item => item.isDefault)) {
-    nextProfiles = nextProfiles.map(item => ({ ...item, isDefault: item.id === profile.id }));
-  }
-  state.aiProfiles = ensureSingleDefault(nextProfiles);
-  state.activeAiProfileId = profile.id;
-  if (state.aiConfigReason === 'translation') state.translationAiProfileId = profile.id;
-  if (state.aiConfigReason === 'rewrite') state.rewriteAiProfileId = profile.id;
-  if (state.aiConfigReason === 'agent') state.agentAiProfileId = profile.id;
-  state.editingAiProfileId = profile.id;
+// Called by the AI settings dialogs after any provider or model change.
+function aiSettingsChanged() {
   persistAiProfiles();
-  renderAiSettings();
-  if (!silent) toast('AI 配置已保存');
-  const reasonConfig = state.aiConfigReason ? aiConfigForPurpose(state.aiConfigReason) : currentAiConfig();
-  if (hasUsableAiConfig(reasonConfig) && state.pendingAiAction) {
+  renderAiStatus();
+  updateAgentControls();
+  if (!state.aiConfigReason || !state.pendingAiAction) return;
+  if (hasUsableAiConfig(aiConfigForPurpose(state.aiConfigReason))) {
     closeAiConfigModal();
     runPendingAiAction();
   }
-  return profile;
-}
-
-function addAiProfile() {
-  const profile = createProfileFromPreset(DEFAULT_AI_PRESET_ID, {
-    name: `DeepSeek ${state.aiProfiles.length + 1}`,
-    isDefault: state.aiProfiles.length === 0,
-  });
-  state.aiProfiles = ensureSingleDefault([...state.aiProfiles, profile]);
-  state.activeAiProfileId = profile.id;
-  state.editingAiProfileId = profile.id;
-  persistAiProfiles();
-  renderAiSettings();
-}
-
-async function deleteAiProfile() {
-  const profile = getEditingAiProfile();
-  if (!profile || state.aiProfiles.length <= 1) return;
-  const ok = await showConfirmDialog({
-    title: '删除 AI 配置',
-    message: `确定删除「${profile.name}」吗？使用这个配置的翻译、改写和对话会切回默认配置。`,
-    confirmText: '删除',
-    danger: true,
-  });
-  if (!ok) return;
-  state.aiProfiles = ensureSingleDefault(state.aiProfiles.filter(item => item.id !== profile.id));
-  state.activeAiProfileId = (state.aiProfiles.find(item => item.isDefault) || state.aiProfiles[0]).id;
-  if (!state.aiProfiles.some(item => item.id === state.translationAiProfileId)) state.translationAiProfileId = state.activeAiProfileId;
-  if (!state.aiProfiles.some(item => item.id === state.rewriteAiProfileId)) state.rewriteAiProfileId = state.activeAiProfileId;
-  if (!state.aiProfiles.some(item => item.id === state.agentAiProfileId)) state.agentAiProfileId = state.activeAiProfileId;
-  state.editingAiProfileId = state.activeAiProfileId;
-  persistAiProfiles();
-  renderAiSettings();
-  toast('AI 配置已删除');
 }
 
 function openAiConfigModal(reason = '', pendingAction = '', pendingText = '') {
@@ -9119,87 +9906,17 @@ function openAiConfigModal(reason = '', pendingAction = '', pendingText = '') {
   mountAiConfigPanel('modal');
   renderAiSettings();
   $('#ai-config-modal').classList.remove('hidden');
-  const config = currentAiConfig();
-  setTimeout(() => {
-    const target = hasUsableAiConfig(config) ? $('#ai-model') : $('#ai-api-key');
-    if (target) target.focus();
-  }, 30);
   return true;
 }
 
 function closeAiConfigModal() {
+  if (window.QMAiSettings) QMAiSettings.closeDialog();
   $('#ai-config-modal').classList.add('hidden');
   state.aiConfigReason = '';
   if (state.workspacePage === 'dashboard' && state.dashboardTab === 'ai') {
     mountAiConfigPanel('dashboard');
   }
   renderAiSettings();
-}
-
-async function fetchAiModels() {
-  if (!requireAuth('login')) return;
-  const profile = readAiProfileForm();
-  const config = configFromProfile(profile);
-  if (!config.apiKey || !config.baseUrl) {
-    toast('请先填写 API Key 和 Base URL');
-    return;
-  }
-  const btn = $('#ai-fetch-models');
-  btn.disabled = true;
-  btn.textContent = '获取中…';
-  $('#ai-config-note').textContent = '正在读取模型列表…';
-  try {
-    const data = await api('/api/ai/models', {
-      method: 'POST',
-      aiConfig: config,
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}',
-    });
-    const models = data.models || [];
-    if (!models.length) {
-      $('#ai-config-note').textContent = '连接成功，但接口没有返回模型列表。';
-      return;
-    }
-    renderQuickModels(models);
-    if (!$('#ai-model').value.trim()) $('#ai-model').value = models[0];
-    $('#ai-config-note').textContent = `已获取 ${models.length} 个模型，点击下方模型可填入。`;
-  } catch (err) {
-    $('#ai-config-note').textContent = err.message;
-    toast('获取模型失败: ' + err.message, 5000);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '获取模型';
-  }
-}
-
-async function testAiConnection() {
-  if (!requireAuth('login')) return;
-  const profile = readAiProfileForm();
-  const config = configFromProfile(profile);
-  if (!hasUsableAiConfig(config)) {
-    toast('请先填写 API Key、Base URL 和模型');
-    return;
-  }
-  const btn = $('#ai-test');
-  btn.disabled = true;
-  btn.textContent = '测试中…';
-  $('#ai-config-note').textContent = '正在测试模型连接…';
-  try {
-    const data = await api('/api/ai/test', {
-      method: 'POST',
-      aiConfig: config,
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}',
-    });
-    $('#ai-config-note').textContent = `连接成功：${data.model || config.model} · ${data.latencyMs || data.latency_ms || '-'}ms`;
-    toast('连接成功');
-  } catch (err) {
-    $('#ai-config-note').textContent = err.message;
-    toast('连接测试失败: ' + err.message, 5000);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '测试连接';
-  }
 }
 
 function setContextPanel(panel = 'agent', { persist = true, expand = false } = {}) {
@@ -9225,7 +9942,7 @@ function setAgentCollapsed(collapsed, { persist: shouldPersist = true, auto = fa
   if (!collapsed && shouldCollapseLeftForContext()) setLeftCollapsed(true);
   state.agentCollapsed = collapsed;
   state.agentAutoCollapsed = Boolean(collapsed && auto);
-  if (shouldPersist) storage.setItem('qm_agent_collapsed', collapsed ? '1' : '0');
+  if (shouldPersist) storage.setItem('qm_agent_open', collapsed ? '0' : '1');
   $('#app').classList.toggle('agent-collapsed', collapsed);
   if (collapsed) $('#app').style.removeProperty('--agent-width');
   const rail = $('#context-open-rail');
@@ -9315,7 +10032,7 @@ function normalizeReaderWorkbenchLayout() {
     setAgentCollapsed(true, { persist: false, auto: true });
     return;
   }
-  if (state.agentAutoCollapsed && storage.getItem('qm_agent_collapsed') !== '1' && !shouldCollapseLeftForContext()) {
+  if (state.agentAutoCollapsed && storage.getItem('qm_agent_open') === '1' && !shouldCollapseLeftForContext()) {
     setAgentCollapsed(false, { persist: false });
   }
 }
@@ -9466,6 +10183,7 @@ function setupListResizer() {
   resizer.addEventListener('keydown', (e) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
     e.preventDefault();
+    e.stopPropagation();
     const bounds = entryPaneWidthBounds();
     const current = state.entryPaneWidth || $('#entry-pane').getBoundingClientRect().width;
     if (e.key === 'Home') setEntryPaneWidth(bounds.min);
@@ -9504,6 +10222,7 @@ function setupContextResizer() {
   resizer.addEventListener('keydown', (e) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
     e.preventDefault();
+    e.stopPropagation();
     const bounds = contextPaneWidthBounds();
     const current = state.contextPaneWidth || $('#agent-pane').getBoundingClientRect().width;
     if (e.key === 'Home') setContextPaneWidth(bounds.min);
@@ -9597,6 +10316,19 @@ $('#entry-list').onclick = async (e) => {
   if (!btn) return;
   await openAssetActivityButton(btn);
 };
+{
+  let scrollSaveFrame = 0;
+  $('#entry-list').addEventListener('scroll', (e) => {
+    if (scrollSaveFrame) return;
+    const el = e.currentTarget;
+    scrollSaveFrame = requestAnimationFrame(() => {
+      scrollSaveFrame = 0;
+      // UI-MOBILE: the list is display:none while reading on phones; re-renders there clamp scrollTop to 0 — don't record that.
+      if (!el.offsetParent) return;
+      listScrollPositions.set(entryListScopeKey(), el.scrollTop);
+    });
+  }, { passive: true });
+}
 $('#refresh-btn').onclick = refreshAll;
 $('#source-refresh-btn').onclick = refreshCurrentSource;
 $('#reader-pane').addEventListener('pointerdown', (e) => {
@@ -9665,9 +10397,9 @@ async function deleteCurrentEntry() {
   if (!entry || !isAdmin()) return;
   const title = entry.titleZh || entry.title || '这篇文章';
   const ok = await showConfirmDialog({
-    title: '删除页面',
-    message: `确认删除《${title}》？这会从前台列表、文章页、公开资产目录中隐藏该页面；已沉淀的翻译、点评、划线和对话数据不会被清空。`,
-    confirmText: '删除页面',
+    title: '删除文章',
+    message: `删除《${title}》？文章会从列表和文章页隐藏，已有的中文稿、划线和对话都会保留。`,
+    confirmText: '删除',
     danger: true,
   });
   if (!ok) return;
@@ -9695,11 +10427,11 @@ async function deleteCurrentEntry() {
     renderSidebar();
     toast('页面已删除');
   } catch (err) {
-    toast('删除失败: ' + err.message, 5000);
+    toast('删除失败：' + err.message, 5000);
   } finally {
     if (btn) {
       btn.disabled = false;
-      setButtonIconLabel(btn, 'trash-2', '删除页面');
+      setButtonIconLabel(btn, 'trash-2', '删除文章');
     }
     renderAdminEntryControls();
   }
@@ -9724,7 +10456,6 @@ $('#reader-copy-link').onclick = () => {
   copyReaderContent();
 };
 $('#reader-prefs-toggle').onclick = () => setReaderPrefsOpen(!state.readerPrefsOpen);
-$('#reader-prefs-close').onclick = () => setReaderPrefsOpen(false);
 const readerAssetsToggle = $('#reader-assets-toggle');
 if (readerAssetsToggle) readerAssetsToggle.onclick = () => setReaderAssetsExpanded(!state.readerAssetsExpanded);
 $('#reader-toc').onclick = (e) => {
@@ -10000,15 +10731,19 @@ $$('.comment-sort-btn').forEach(btn => {
 $('#comment-login').onclick = () => openAuth('login');
 $('#agent-form').onsubmit = (e) => {
   e.preventDefault();
+  if (state.agentBusy) { stopAgentMessage(); return; }
   sendAgentMessage($('#agent-input').value);
 };
 $('#agent-input').oninput = (e) => {
   e.target.style.height = 'auto';
   e.target.style.height = `${Math.min(e.target.scrollHeight, 170)}px`;
+  const length = e.target.value.length;
+  $('#agent-count').textContent = length > 200 ? String(length) : '';
   updateAgentControls();
 };
 $('#agent-input').onkeydown = (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
+  // Enter that confirms an IME candidate must not send the half-typed question.
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
     e.preventDefault();
     sendAgentMessage(e.currentTarget.value);
   }
@@ -10019,6 +10754,7 @@ $('#agent-open').onclick = () => setContextPanel(state.contextPanel, { expand: t
 const agentCopyThread = $('#agent-copy-thread');
 if (agentCopyThread) agentCopyThread.onclick = copyAgentThread;
 $('#agent-settings').onclick = () => openAiConfigModal('settings');
+agentPicker();
 const agentProfileSelect = $('#agent-profile-select');
 if (agentProfileSelect) agentProfileSelect.onchange = (e) => setAiProfileForPurpose('agent', e.target.value);
 const translationProfileSelect = $('#translation-profile-select');
@@ -10033,6 +10769,10 @@ $('#account-settings-open').onclick = (e) => {
 $('#account-menu-dashboard').onclick = () => {
   setAccountMenuOpen(false);
   openMyCommentsModal({ tab: 'profile' });
+};
+$('#account-menu-history').onclick = () => {
+  setAccountMenuOpen(false);
+  selectView('history');
 };
 $('#account-menu-profile').onclick = () => {
   setAccountMenuOpen(false);
@@ -10170,24 +10910,10 @@ $('#contributor-list').onclick = (e) => {
 };
 $('#ai-config-close').onclick = closeAiConfigModal;
 $('#ai-config-modal').onclick = (e) => { if (e.target.id === 'ai-config-modal') closeAiConfigModal(); };
-$('#ai-add-profile').onclick = addAiProfile;
-$('#ai-delete-profile').onclick = deleteAiProfile;
-$('#ai-profile-form').onsubmit = (e) => {
-  e.preventDefault();
-  saveAiProfileFromForm();
-};
-$('#ai-template-list').onclick = (e) => {
-  const btn = e.target.closest('.ai-template');
-  if (btn) applyAiPreset(btn.dataset.preset);
-};
-$('#ai-quick-models').onclick = (e) => {
-  const btn = e.target.closest('.ai-model-chip');
-  if (!btn) return;
-  $('#ai-model').value = btn.dataset.model || btn.textContent.trim();
-};
-$('#ai-max-tokens').oninput = (e) => { e.target.value = e.target.value.replace(/[^\d]/g, ''); };
-$('#ai-fetch-models').onclick = fetchAiModels;
-$('#ai-test').onclick = testAiConnection;
+$('#add-provider-btn').onclick = (e) => { e.preventDefault(); QMAiSettings.addProvider(); };
+$('#add-model-btn').onclick = (e) => { e.preventDefault(); QMAiSettings.addModel(); };
+$('#pd-close').onclick = () => QMAiSettings.closeDialog();
+$('#pd-modal').onclick = (e) => { if (e.target.id === 'pd-modal') QMAiSettings.closeDialog(); };
 $('.agent-prompts').onclick = (e) => {
   if (e.target.closest('[data-agent-prompt-manage]')) {
     openAgentPromptManager();
@@ -10235,12 +10961,58 @@ $('#agent-prompt-list').onclick = async (e) => {
 $('#reader-immersive').onclick = () => setReaderImmersive(!state.readerImmersive);
 $('#reader-font-size-down').onclick = () => setReaderPref('fontSize', state.readerPrefs.fontSize - 1);
 $('#reader-font-size-up').onclick = () => setReaderPref('fontSize', state.readerPrefs.fontSize + 1);
-$('#reader-line-height').oninput = (e) => setReaderPref('lineHeight', e.target.value);
-$('#reader-measure').oninput = (e) => setReaderPref('measure', e.target.value);
-$('#reader-font-family').onchange = (e) => setReaderPref('font', e.target.value);
+$('#reader-preferences').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-pref]');
+  if (!btn) return;
+  if (btn.dataset.pref === 'paper') setReaderPaper(btn.dataset.value);
+  else setReaderPref(btn.dataset.pref, btn.dataset.pref === 'font' ? btn.dataset.value : Number(btn.dataset.value));
+});
+$('#reader-prefs-reset').onclick = () => {
+  state.readerPrefs = { ...READER_PREF_DEFAULTS };
+  persistReaderPrefs();
+  setReaderPaper('light');
+  applyReaderPrefs();
+};
+function setReaderMoreOpen(open) {
+  $('#reader-more-menu')?.classList.toggle('hidden', !open);
+  $('#reader-more-toggle')?.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+$('#reader-more-toggle').onclick = (e) => {
+  e.stopPropagation();
+  const open = $('#reader-more-menu').classList.contains('hidden');
+  if (open) setReaderPrefsOpen(false);
+  setReaderMoreOpen(open);
+};
+$('#reader-more-menu').addEventListener('click', () => setReaderMoreOpen(false));
 $('#manage-btn').onclick = openManageModal;
 $('#manage-close').onclick = () => $('#manage-modal').classList.add('hidden');
 $('#manage-modal').onclick = (e) => { if (e.target.id === 'manage-modal') $('#manage-modal').classList.add('hidden'); };
+$('#wechat-close').onclick = closeWechatCatalog;
+$('#wechat-modal').onclick = (e) => { if (e.target.id === 'wechat-modal') closeWechatCatalog(); };
+$('#wechat-query').oninput = () => { wechatCatalogPageSize = 60; renderWechatCatalog(); };
+$('#wechat-modal').addEventListener('keydown', event => {
+  if (event.key === 'Escape') { event.preventDefault(); closeWechatCatalog(); }
+  if (event.key !== 'Tab') return;
+  const focusable = [...$('#wechat-modal').querySelectorAll('button:not(:disabled), input')];
+  const first = focusable[0], last = focusable.at(-1);
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+});
+$('#podcast-subscribe-close').onclick = closePodcastCatalog;
+$('#podcast-subscribe-modal').onclick = event => { if (event.target.id === 'podcast-subscribe-modal') closePodcastCatalog(); };
+$('#podcast-subscribe-query').oninput = event => {
+  clearTimeout(podcastSearchTimer);
+  const query = event.target.value;
+  podcastSearchTimer = setTimeout(() => { void searchPodcastCatalog(query); }, 280);
+};
+$('#podcast-subscribe-modal').addEventListener('keydown', event => {
+  if (event.key === 'Escape') { event.preventDefault(); closePodcastCatalog(); }
+  if (event.key !== 'Tab') return;
+  const focusable = [...$('#podcast-subscribe-modal').querySelectorAll('button:not(:disabled), input')];
+  const first = focusable[0], last = focusable.at(-1);
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+});
 $('#auth-open').onclick = () => openAuth('login');
 $('#auth-close').onclick = closeAuth;
 $('#auth-modal').onclick = (e) => { if (e.target.id === 'auth-modal') closeAuth(); };
@@ -10278,9 +11050,7 @@ $('#search').oninput = (e) => {
 };
 
 $('#theme-toggle').onclick = () => {
-  const next = document.body.dataset.theme === 'dark' ? 'light' : 'dark';
-  document.body.dataset.theme = next;
-  storage.setItem('fr_theme', next);
+  setReaderPaper(document.body.dataset.theme === 'dark' ? 'light' : 'dark');
 };
 
 window.addEventListener('error', (e) => {
@@ -10294,6 +11064,7 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('.account-strip')) setAccountMenuOpen(false);
   if (!e.target.closest('#article-link-menu')) hideArticleLinkMenu();
   if (!e.target.closest('#reader-preferences, #reader-prefs-toggle')) setReaderPrefsOpen(false);
+  if (!e.target.closest('.reader-more')) setReaderMoreOpen(false);
 });
 
 function isShortcutEditableTarget(target) {
@@ -10360,13 +11131,13 @@ function moveVisibleEntry(delta, { notifyEdge = false } = {}) {
   }
   const nextIndex = idx < 0 ? fallback : idx + delta;
   if (nextIndex < 0 || nextIndex >= list.length) {
-    if (notifyEdge) toast(delta > 0 ? '已是当前列表最后一篇' : '已是当前列表第一篇');
+    if (notifyEdge) toast(delta > 0 ? '已是最后一篇。今天的阅读量，超过了全国 99% 的用户' : '已是第一篇，再往前就是昨天了');
     pulseReaderNavEdge(delta);
     return;
   }
   const next = list[nextIndex];
   if (!next || next.id === state.activeEntry?.id) {
-    if (notifyEdge) toast(delta > 0 ? '已是当前列表最后一篇' : '已是当前列表第一篇');
+    if (notifyEdge) toast(delta > 0 ? '已是最后一篇。今天的阅读量，超过了全国 99% 的用户' : '已是第一篇，再往前就是昨天了');
     pulseReaderNavEdge(delta);
     return;
   }
@@ -10383,11 +11154,19 @@ function moveReaderVersion(delta) {
 document.addEventListener('keydown', (e) => {
   const editable = isShortcutEditableTarget(e.target);
   if (e.key === 'Escape') {
+    if (state.readerPrefsOpen) {
+      e.preventDefault();
+      setReaderPrefsOpen(false);
+      $('#reader-prefs-toggle').focus({ preventScroll: true });
+      return;
+    }
+    if (window.QMAiSettings && QMAiSettings.hasDialog()) { QMAiSettings.closeDialog(); return; }
     if (state.readerImmersive) setReaderImmersive(false);
     setReaderPrefsOpen(false);
     document.getElementById('app').classList.remove('reading');
     setAccountMenuOpen(false);
     $('#manage-modal').classList.add('hidden');
+    $('#wechat-modal').classList.add('hidden');
     $('#ai-config-modal').classList.add('hidden');
     $('#submit-link-modal').classList.add('hidden');
     $('#agent-prompt-modal').classList.add('hidden');
@@ -10442,6 +11221,15 @@ window.addEventListener('popstate', () => {
   openEntryFromUrl();
 });
 
+$('#podscribe-nav')?.addEventListener('click', event => {
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+  event.preventDefault();
+  if (window.location.pathname !== '/podscribe') history.pushState({ workspacePage: 'podscribe' }, '', '/podscribe');
+  setPodcastMode(true);
+  document.title = '播客文稿 · QMReader';
+  window.qmPodscribe?.restoreFromUrl();
+});
+
 window.addEventListener('resize', () => {
   hideArticleLinkMenu();
   normalizeReaderWorkbenchLayout();
@@ -10450,9 +11238,119 @@ window.addEventListener('resize', () => {
 });
 $('#reader-pane').addEventListener('scroll', hideArticleLinkMenu, { passive: true });
 
+/* ---------- UI-MOBILE: phone navigation + article prefetch ----------
+   Phones and portrait tablets (<=860px) get one column: list → article. A bottom tab bar with text
+   labels replaces the icon rail; the full sidebar becomes a drawer ("频道");
+   the article gets a top bar with an explicit "返回" and an "AI 伴读" sheet. */
+const phoneQuery = window.matchMedia('(max-width: 860px)');
+let mobileReaderFromList = false;
+
+function setMobileDrawer(open) {
+  const next = Boolean(open) && phoneQuery.matches;
+  $('#app').classList.toggle('mobile-drawer-open', next);
+  document.body.classList.toggle('mobile-drawer-open', next);
+  syncMobileTabbar();
+}
+
+function syncMobileTabbar() {
+  const bar = $('#mobile-tabbar');
+  if (!bar) return;
+  let active = 'home';
+  if ($('#app').classList.contains('mobile-drawer-open') || state.filterSource || state.filterCategory) active = 'sources';
+  else if (state.workspacePage === 'dashboard' || state.workspacePage === 'admin') active = 'me';
+  else if (state.view === 'starred') active = 'starred';
+  else if (state.view === 'history') active = 'history';
+  bar.querySelectorAll('[data-mobile-tab]').forEach(btn => {
+    const on = btn.dataset.mobileTab === active;
+    btn.classList.toggle('active', on);
+    if (on) btn.setAttribute('aria-current', 'page');
+    else btn.removeAttribute('aria-current');
+  });
+  const title = $('#mobile-reader-title');
+  if (title) title.textContent = state.activeEntry ? (state.activeEntry.titleZh || state.activeEntry.title || '') : '';
+}
+
+function mobileBackToList() {
+  if (!state.agentCollapsed) setAgentCollapsed(true, { persist: false });
+  if (mobileReaderFromList && history.state && history.state.entryId) {
+    mobileReaderFromList = false;
+    history.back(); // popstate → openEntryFromUrl closes the reader and keeps browser history tidy
+    return;
+  }
+  mobileReaderFromList = false;
+  closeReaderFromRoute();
+  clearReaderUrl({ replace: true });
+  syncMobileTabbar();
+}
+
+$('#mobile-back')?.addEventListener('click', mobileBackToList);
+$('#mobile-ai-open')?.addEventListener('click', () => setAgentCollapsed(false, { persist: false }));
+$('#mobile-scrim')?.addEventListener('click', () => {
+  if ($('#app').classList.contains('mobile-drawer-open')) setMobileDrawer(false);
+  else if (!state.agentCollapsed) setAgentCollapsed(true, { persist: false });
+});
+$('#mobile-tabbar')?.addEventListener('click', event => {
+  const btn = event.target.closest('[data-mobile-tab]');
+  if (!btn) return;
+  const tab = btn.dataset.mobileTab;
+  if (tab === 'sources') {
+    setMobileDrawer(!$('#app').classList.contains('mobile-drawer-open'));
+    return;
+  }
+  setMobileDrawer(false);
+  if (tab === 'home') {
+    const atHome = state.view === 'all' && !state.filterSource && !state.filterCategory && !state.q && !state.workspacePage && !state.activeEntry;
+    if (atHome) $('#entry-list')?.scrollTo({ top: 0, behavior: 'smooth' });
+    else goHomeAll();
+  } else if (tab === 'starred' || tab === 'history') {
+    selectView(tab);
+  } else if (tab === 'me') {
+    if (state.me) $('#account-info')?.click();
+    else $('#auth-open')?.click();
+  }
+  syncMobileTabbar();
+});
+// Picking anything that changes the list from inside the drawer closes it.
+$('#sidebar').addEventListener('click', event => {
+  if (!$('#app').classList.contains('mobile-drawer-open')) return;
+  if (event.target.closest('.feed-item, .view-btn, .group-label, #brand-home, #submit-link-open, .asset-dashboard button, .wechat-add-btn, #auth-open, #account-info')) {
+    setMobileDrawer(false);
+  }
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && $('#app').classList.contains('mobile-drawer-open')) setMobileDrawer(false);
+});
+phoneQuery.addEventListener?.('change', () => setMobileDrawer(false));
+window.addEventListener('popstate', () => { mobileReaderFromList = false; });
+
+{
+  const list = $('#entry-list');
+  const cardId = target => target && target.closest && target.closest('.entry-card')?.dataset.id;
+  let hoverTimer = 0;
+  // Capture phase so this runs before the card's own click → openEntry.
+  list.addEventListener('click', event => {
+    if (!cardId(event.target) || !phoneQuery.matches) return;
+    mobileReaderFromList = true;
+    if (!state.agentCollapsed) setAgentCollapsed(true, { persist: false }); // article first; AI is one tap away
+  }, true);
+  list.addEventListener('pointerdown', event => {
+    clearTimeout(hoverTimer);
+    const id = cardId(event.target);
+    if (id) prefetchEntry(id);
+  }, { passive: true });
+  list.addEventListener('pointerover', event => {
+    if (event.pointerType !== 'mouse') return;
+    clearTimeout(hoverTimer);
+    const id = cardId(event.target);
+    if (id) hoverTimer = setTimeout(() => prefetchEntry(id), 90);
+  }, { passive: true });
+  list.addEventListener('pointerout', () => clearTimeout(hoverTimer), { passive: true });
+}
+
 /* ---------- Init ---------- */
 (async function init() {
   document.body.dataset.theme = storage.getItem('fr_theme') || 'light';
+  if (document.body.dataset.theme !== 'dark' && storage.getItem('qm_paper') === 'sepia') document.body.dataset.paper = 'sepia';
   hydrateLucideIcons();
   loadAiProfilesForScope();
   renderAgentPrompts();
@@ -10467,19 +11365,39 @@ $('#reader-pane').addEventListener('scroll', hideArticleLinkMenu, { passive: tru
   setupContextResizer();
   setAgentCollapsed(state.agentCollapsed);
   setContextPanel(state.contextPanel, { persist: false, expand: false });
-  $('#entry-list').innerHTML = '<div class="list-empty">正在加载订阅内容…</div>';
+  if (/^\/podscribe\/?$/.test(window.location.pathname)) setPodcastMode(true);
+  $('#entry-list').innerHTML = entryListSkeletonHtml();
+  const authTask = loadMe().catch(error => {
+    if (state.authRestoreFailed) {
+      toast('账户同步较慢，文章可直接阅读；稍后将自动重试', 5000);
+      setTimeout(recoverAccountWhenVisible, 5000);
+    }
+    return null;
+  });
   try {
     const route = routeStateFromUrl();
-    if (route.view === 'contributors') state.contributorSort = route.contributorSort;
-    const collectionTask = route.view === 'contributors'
-      ? loadContributors()
-      : loadEntries({ fullWindow: ENTRY_LIST_FIXED_VIEWS.includes(route.view) });
-    const [, data] = await Promise.all([
-      loadMe(),
-      loadSources(),
-      collectionTask,
-    ]);
-    await openEntryFromUrl({ reuseLoadedCollections: true });
+    const articleTask = route.entryId ? openEntryFromUrl({ reuseLoadedCollections: true }) : null;
+    let data;
+    if (route.view === 'contributors') {
+      state.contributorSort = route.contributorSort;
+      [data] = await Promise.all([loadSources(), loadContributors()]);
+    } else if (!route.admin && !route.dashboard) {
+      const catalogTask = loadSources().then(value => {
+        renderSidebar();
+        if (state.entries.length) renderList();
+        return value;
+      }).catch(() => { toast('频道信息暂未同步，文章仍可阅读', 4000); return { refreshing: false }; });
+      await loadEntries({ summary: route.view === 'assets' ? 'full' : route.view === 'hot' ? 'compact' : 'minimal' });
+      updateListTitle(); renderList();
+      // Catalog is supplementary; never gate first-paint on it.
+      void catalogTask;
+      data = { refreshing: false };
+    } else {
+      data = await loadSources();
+      await authTask;
+    }
+    if (articleTask) await articleTask;
+    else await openEntryFromUrl({ reuseLoadedCollections: true });
     // first boot: server may still be fetching — poll a few times
     if (data.refreshing || (route.view !== 'contributors' && state.entries.length === 0)) {
       for (let i = 0; i < 40; i++) {
@@ -10497,3 +11415,13 @@ $('#reader-pane').addEventListener('scroll', hideArticleLinkMenu, { passive: tru
     $('#entry-list').innerHTML = `<div class="list-empty">数据加载失败：${escapeHtml(e.message)}<br/><button class="ghost-btn" onclick="location.reload()" style="margin-top:10px">重新加载</button></div>`;
   }
 })();
+
+// Retry only a failed read-only session lookup when connectivity returns.
+let lastAuthRecoveryAt = 0;
+function recoverAccountWhenVisible() {
+  if (!state.authRestoreFailed || document.visibilityState === 'hidden' || Date.now() - lastAuthRecoveryAt < 30000) return;
+  lastAuthRecoveryAt = Date.now();
+  loadMe().catch(() => {});
+}
+window.addEventListener('online', recoverAccountWhenVisible);
+document.addEventListener('visibilitychange', recoverAccountWhenVisible);
