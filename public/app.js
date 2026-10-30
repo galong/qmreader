@@ -9126,7 +9126,7 @@ async function refreshCurrentSource() {
   setSourceRefreshStatus('正在检查', 'loading');
   toast(`正在检查 ${source.name} 更新…`, 2600);
   try {
-    const beforeEntries = await sourceEntriesSnapshot(source.id).catch(() => []);
+    const beforeEntries = await sourceEntriesSnapshot(source.id);
     const result = await api('/api/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -9145,7 +9145,7 @@ async function refreshCurrentSource() {
     if (latestSource && latestSource.status === 'error') {
       throw new Error(latestSource.error || '信息源刷新失败');
     }
-    const afterEntries = await sourceEntriesSnapshot(source.id).catch(() => []);
+    const afterEntries = await sourceEntriesSnapshot(source.id);
     const added = newEntryCount(beforeEntries, afterEntries);
     await reload({ keepReader: true });
     const doneMessage = added ? `${source.name} 新增 ${added} 篇` : `${source.name} 暂无更新`;

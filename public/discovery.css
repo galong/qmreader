@@ -18,3 +18,5 @@
 #list-context-row:has(#source-refresh-status:not(.hidden)) .list-scope-count { display: none; }
 #list-context-row #source-refresh-btn:focus-visible { outline: 1px solid var(--text-2); outline-offset: 1px; }
 #list-context-row #source-refresh-btn:disabled { opacity: .55; cursor: wait; }
+
+.public-summary:not([open]) { text-align: center; }
