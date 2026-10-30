@@ -12,6 +12,27 @@ const fetcher = require('../lib/fetcher');
 
 after(() => fs.rmSync(testDataDir, { recursive: true, force: true }));
 
+test('RSS media URLs with bare ampersands parse without changing CDATA or valid entities', async () => {
+  const xml = `<?xml version="1.0"?><rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+    <channel><title>Feed</title><link>https://example.com</link><description>Test</description>
+      <!-- a comment with & stays a comment -->
+      <item><title>Banks &amp; payments &#38; commerce &#x26; finance</title>
+        <link>https://example.com/story?a=1&b=2</link>
+        <description><![CDATA[<p>A & B, literal &amp; stays unchanged.</p>]]></description>
+        <media:content medium="image" url="https://example.com/image.png?w=457&quality=82" />
+      </item>
+    </channel></rss>`;
+  const feed = await fetcher.__test.parseRssXml(xml);
+  assert.equal(feed.items[0].title, 'Banks & payments & commerce & finance');
+  assert.equal(feed.items[0].link, 'https://example.com/story?a=1&b=2');
+  assert.equal(feed.items[0].mediaContent[0].$.url, 'https://example.com/image.png?w=457&quality=82');
+  assert.equal(feed.items[0].content, '<p>A & B, literal &amp; stays unchanged.</p>');
+});
+
+test('RSS normalization still rejects structurally invalid XML', async () => {
+  await assert.rejects(fetcher.__test.parseRssXml('<rss><channel><item></channel></rss>'));
+});
+
 function runLookup(lookup, hostname, options = {}) {
   return new Promise((resolve, reject) => {
     lookup(hostname, options, (error, address, family) => {
