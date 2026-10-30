@@ -103,7 +103,7 @@ test('HTTP output exposes public content, unique SEO metadata and installable PW
       assert.equal(`${buffer.readUInt32BE(16)}x${buffer.readUInt32BE(20)}`, icon.sizes);
     }
     const worker = await fetch(`${base}/sw.js`);
-    assert.equal(worker.headers.get('cache-control'), 'no-cache');
+    assert.equal(worker.headers.get('cache-control'), 'no-store');
     assert.equal(worker.headers.get('service-worker-allowed'), '/');
     assert.match(await (await fetch(`${base}/offline.html`)).text(), /暂时无法连接/);
   } finally {
