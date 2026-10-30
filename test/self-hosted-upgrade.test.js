@@ -49,3 +49,19 @@ test('requests using the server key follow the configured custom provider and ig
   assert.equal(config.baseUrl, values.AI_BASE_URL);
   assert.equal(config.model, values.AI_MODEL);
 });
+
+test('title-only AI jobs report provider failures instead of a successful zero-title result', async t => {
+  const previous = process.env.AUTO_REWRITE_CONTENT_ENABLED;
+  process.env.AUTO_REWRITE_CONTENT_ENABLED = '0';
+  t.after(() => {
+    if (previous === undefined) delete process.env.AUTO_REWRITE_CONTENT_ENABLED;
+    else process.env.AUTO_REWRITE_CONTENT_ENABLED = previous;
+  });
+  t.mock.method(fetcher, 'loadDisk', () => {});
+  t.mock.method(fetcher, 'getEntries', () => [{ id: 'one', sourceId: 'pymnts', title: 'Bank launches a new payment service' }]);
+  t.mock.method(deepseek, 'getConfig', () => ({ configured: true }));
+  t.mock.method(deepseek, 'translateTitleBatch', async () => { throw Error('Provider request failed: 404 model unavailable'); });
+  await assert.rejects(jobs.runRefreshJob({ kind: 'auto-rewrite', sourceIds: ['pymnts'], catchup: true }, {
+    onAutoRewriteDone() { assert.fail('failed title translation must not report completion'); },
+  }), /404 model unavailable/);
+});
