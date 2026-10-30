@@ -70,11 +70,17 @@ test('a slow authenticated read keeps its full deadline instead of restarting ha
 
 test('a stalled authenticated body still stops at the total deadline', async () => {
   let calls = 0;
-  await assert.rejects(reader()('/api/entry/test', { publicRead: false, timeoutMs: 100 }, {
-    origin: 'https://rss.qiaomu.ai', fetch: async () => {
-      calls++;
-      return { ok: true, headers: new Headers(), text: () => new Promise(() => {}) };
-    }
-  }), /超时/);
-  assert.equal(calls, 1);
+  const realNow = Date.now;
+  // Reproduce a timeout firing before the coarse wall clock reaches deadline.
+  const started = realNow();
+  Date.now = () => started;
+  try {
+    await assert.rejects(reader()('/api/entry/test', { publicRead: false, timeoutMs: 100 }, {
+      origin: 'https://rss.qiaomu.ai', fetch: async () => {
+        calls++;
+        return { ok: true, headers: new Headers(), text: () => new Promise(() => {}) };
+      }
+    }), /超时/);
+    assert.equal(calls, 1);
+  } finally { Date.now = realNow; }
 });
