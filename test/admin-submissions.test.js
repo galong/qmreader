@@ -227,7 +227,7 @@ test('moderation disables a non-admin user, revokes sessions, deletes submission
   assert.equal(store.getEntry('offender-entry-one'), null);
 });
 
-test('admin API previews and deletes one reader submissions with permission and confirmation gates', { timeout: 15000 }, async () => {
+test('admin API previews and deletes one reader submissions with permission and confirmation gates', { timeout: 15000 }, async t => {
   const reader = store.createUser({ email: uniqueEmail('api-reader-c'), password: 'password-123', displayName: 'c' });
   const other = store.createUser({ email: uniqueEmail('api-reader-d'), password: 'password-123', displayName: 'd' });
   const offender = store.createUser({ email: uniqueEmail('api-offender'), password: 'password-123', displayName: '违规用户' });
@@ -241,10 +241,21 @@ test('admin API previews and deletes one reader submissions with permission and 
   const baseUrl = `http://127.0.0.1:${port}`;
   const adminEmail = uniqueEmail('admin');
   const adminPassword = 'admin-password-123';
+  // Exercise the real fail-closed DR gate with an isolated control fixture.
+  const http = require('node:http');
+  const control = http.createServer((req, res) => {
+    assert.equal(req.headers.authorization, 'Bearer test-dr-key');
+    assert.ok(['/__dr/start', '/__dr/finish'].includes(req.url));
+    req.resume(); res.end('{}');
+  });
+  await new Promise(resolve => control.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => control.close(resolve)));
   const child = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
     env: {
       ...process.env,
+      RSS_DR_CONTROL_URL: `http://127.0.0.1:${control.address().port}`,
+      RSS_DR_CONTROL_KEY: 'test-dr-key',
       HOST: '127.0.0.1',
       PORT: String(port),
       STARTUP_REFRESH_DELAY_MS: '-1',
@@ -263,6 +274,33 @@ test('admin API previews and deletes one reader submissions with permission and 
     const guardCookie = await login(baseUrl, guardUser.email, 'password-123');
     const adminMeResponse = await fetch(`${baseUrl}/api/me`, { headers: { Cookie: adminCookie } });
     const adminMe = (await adminMeResponse.json()).user;
+    // An administrator with a full legacy queue must still collect directly.
+    for (let i = 0; i < 3; i += 1) {
+      store.createSubmissionRequest({ url: `https://example.com/admin-legacy-${i}`, userId: adminMe.id });
+    }
+    const directPayload = {
+      url: 'https://example.com/admin-direct-collection',
+      title: '管理员直接收录',
+      markdown: '# 管理员直接收录\n\n这是管理员提供的文章正文，用于验证直接公开且不进入普通投稿审核队列。',
+    };
+    const directSubmit = await fetch(`${baseUrl}/api/submit-link`, {
+      method: 'POST',
+      headers: { Cookie: adminCookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify(directPayload),
+    });
+    assert.equal(directSubmit.status, 201);
+    const direct = await directSubmit.json();
+    assert.equal(direct.pending, false);
+    assert.equal(direct.entry.link, directPayload.url);
+    assert.ok(store.getSubmittedEntries().some(item => item.link === directPayload.url));
+    assert.equal(store.getSubmissionRequests().filter(item => item.userId === adminMe.id).length, 3);
+    const duplicateSubmit = await fetch(`${baseUrl}/api/submit-link`, {
+      method: 'POST', headers: { Cookie: adminCookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: directPayload.url }),
+    });
+    assert.equal(duplicateSubmit.status, 200);
+    assert.equal((await duplicateSubmit.json()).entry.id, direct.entry.id);
+
     const pendingRequest = store.createSubmissionRequest({
       url: 'https://example.com/api-pending',
       userId: guardUser.id,
@@ -291,7 +329,7 @@ test('admin API previews and deletes one reader submissions with permission and 
     const quarantinedSubmit = await fetch(`${baseUrl}/api/submit-link`, {
       method: 'POST',
       headers: { Cookie: readerCookie, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: 'https://example.com/quarantined-via-api', note: 'pending only' }),
+      body: JSON.stringify({ url: 'https://example.com/quarantined-via-api', note: 'pending only', role: 'admin', markdown: '不能借请求正文冒充管理员' }),
     });
     assert.equal(quarantinedSubmit.status, 202);
     const quarantined = await quarantinedSubmit.json();

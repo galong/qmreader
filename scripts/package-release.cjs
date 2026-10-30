@@ -1,0 +1,16 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const { execFileSync } = require('node:child_process');
+const args = process.argv.slice(2);
+const ref = args.includes('--commit') ? args[args.indexOf('--commit') + 1] : 'HEAD';
+const commit = execFileSync('git', ['rev-parse', `${ref}^{commit}`], { encoding: 'utf8' }).trim();
+const version = JSON.parse(execFileSync('git', ['show', `${commit}:package.json`], { encoding: 'utf8' })).version;
+const dir = path.resolve('artifacts/releases'); fs.mkdirSync(dir, { recursive: true });
+const file = path.join(dir, `qmreader-${version}-${commit.slice(0, 12)}.tar.gz`);
+execFileSync('git', ['archive', '--format=tar.gz', `--output=${file}`, commit, 'server.js', 'package.json', 'package-lock.json', 'lib', 'public', 'scripts', '.rss-reliability']);
+const sha256 = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+const manifest = { version, commit, sha256, archive: path.basename(file) };
+fs.writeFileSync(`${file}.json`, JSON.stringify(manifest, null, 2) + '\n');
+console.log(JSON.stringify({ ...manifest, file }));

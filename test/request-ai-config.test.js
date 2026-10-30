@@ -29,7 +29,7 @@ test('server-funded requests ignore client provider, base URL, model, and tuning
     providerName: 'DeepSeek',
     providerType: 'openai_compatible',
     baseUrl: '',
-    model: 'deepseek-v4-flash',
+    model: 'deepseek-flash',
     temperature: '',
     maxTokens: '',
   });

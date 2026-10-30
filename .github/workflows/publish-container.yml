@@ -54,6 +54,8 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
+          build-args: |
+            APP_REVISION=${{ github.sha }}
           tags: |
             ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
             ${{ env.IMAGE_NAME }}:latest

@@ -1,15 +1,44 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('node:crypto');
+const os = require('node:os');
 const { fork } = require('child_process');
 const compression = require('compression');
 const fetcher = require('./lib/fetcher');
+const { createWechatImageService } = require('./lib/wechat-images');
 const deepseek = require('./lib/deepseek');
+const { createAiOAuth } = require('./lib/ai-oauth');
+const { createSecretBox } = require('./lib/secret-box');
 const { requestAiConfig } = require('./lib/request-ai-config');
+const { runWithAiActor } = require('./lib/ai-spend-guard');
 const store = require('./lib/store');
 const autoRewritePolicy = require('./lib/auto-rewrite-policy');
+const { mountPodcastNotes } = require('./lib/podcast-notes');
+const { mountYoutubeNotes } = require('./lib/youtube-notes');
+const podcastTranscript = require('./lib/podcast-transcript');
+const podscribe = require('./lib/podscribe');
+const wechatCatalog = require('./lib/wechat-catalog');
+const { SOURCES, registerPodcastSource, registerWechatSource } = require('./lib/sources');
+const podscribeEntry = require('./lib/podscribe-entry');
+const { createResponseCache, sendCached, compactEntry, dataStamp } = require('./lib/response-cache');
+const { clientIp } = require('./lib/client-ip');
+const { renderReadBootstrap, renderArticleBootstrap } = require('./lib/read-bootstrap');
+const apiV1 = require('./lib/api-v1');
+const { readingAssetState } = require('./lib/reading-state');
 
 const app = express();
+const wechatImages = createWechatImageService();
+function mediaListEntry(entry) {
+  const { content, ...rest } = wechatImages.rewriteEntry(entry);
+  return rest;
+}
+// Preserve the existing DR installer mount while keeping recovery self-contained.
+if (fs.existsSync('/opt/qiaomu-apps/qiaomu-rss-dr/primary-gate.cjs')) {
+  app.use(require('/opt/qiaomu-apps/qiaomu-rss-dr/primary-gate.cjs').middleware());
+} else {
+  app.use(require('./lib/dr/primary-gate.cjs').middleware());
+}
 app.disable('x-powered-by');
 const PORT = process.env.PORT || 8080;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -20,6 +49,9 @@ const STARTUP_REFRESH_DELAY_MS = parseInt(process.env.STARTUP_REFRESH_DELAY_MS |
 const SOURCE_INTERACTION_REFRESH_COOLDOWN_MS = parseInt(process.env.SOURCE_INTERACTION_REFRESH_COOLDOWN_MS || `${5 * MINUTE_MS}`, 10);
 const FRESHNESS_SWEEP_INTERVAL_MS = parseInt(process.env.FRESHNESS_SWEEP_INTERVAL_MS || `${5 * MINUTE_MS}`, 10);
 const FRESHNESS_STARTUP_DELAY_MS = parseInt(process.env.FRESHNESS_STARTUP_DELAY_MS || `${2 * MINUTE_MS}`, 10);
+const WORKER_NICENESS = parseInt(process.env.WORKER_NICENESS || '10', 10);
+const REWRITE_CATCHUP_INTERVAL_MS = parseInt(process.env.REWRITE_CATCHUP_INTERVAL_MS || `${10 * MINUTE_MS}`, 10);
+const REWRITE_CATCHUP_STARTUP_DELAY_MS = parseInt(process.env.REWRITE_CATCHUP_STARTUP_DELAY_MS || `${4 * MINUTE_MS}`, 10);
 const FRESHNESS_SWEEP_BATCH_SIZE = parseInt(process.env.FRESHNESS_SWEEP_BATCH_SIZE || '3', 10);
 const FRESHNESS_SWEEP_MAX_COST = parseInt(process.env.FRESHNESS_SWEEP_MAX_COST || '6', 10);
 const NEWS_REFRESH_INTERVAL_MS = parseInt(process.env.NEWS_REFRESH_INTERVAL_MS || `${30 * MINUTE_MS}`, 10);
@@ -67,7 +99,7 @@ const ASSET_DIRECTORY_META = {
   },
 };
 
-app.set('trust proxy', 1);
+app.set('trust proxy', 'loopback');
 app.use(compression());
 app.use(express.json({ limit: '2mb' }));
 app.use((req, res, next) => {
@@ -75,8 +107,11 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (req.path === '/api/clipper/clips' && require('./lib/qiaomu-clipper').isClipperClient(req)) return next();
   const unsafe = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
   if (!unsafe) return next();
+  // Bearer-token clients (Obsidian plugin, scripts) send no cookies, so CSRF does not apply.
+  if (/^Bearer\s+qmr_/i.test(String(req.get('authorization') || ''))) return next();
   if (String(req.get('sec-fetch-site') || '').toLowerCase() === 'cross-site') {
     return res.status(403).json({ error: '拒绝跨站操作' });
   }
@@ -89,9 +124,24 @@ app.use((req, res, next) => {
   }
   return next();
 });
+if (fs.existsSync('/opt/qiaomu-apps/qiaomu-rss-dr/public-read-cache.cjs')) {
+  app.use(require('/opt/qiaomu-apps/qiaomu-rss-dr/public-read-cache.cjs').middleware({ directory: process.env.QMREADER_DATA_DIR || path.join(__dirname, 'data') }));
+} else {
+  app.use(require('./lib/dr/public-read-cache.cjs').middleware({ directory: process.env.QMREADER_DATA_DIR || path.join(__dirname, 'data') }));
+}
+wechatImages.mount(app);
 app.use((req, res, next) => {
   try {
-    req.user = store.getUserBySessionToken(cookieValue(req, SESSION_COOKIE));
+    const bearer = /^Bearer\s+(qmr_[A-Za-z0-9_-]+)$/i.exec(String(req.get('authorization') || ''));
+    if (bearer) {
+      req.user = store.getUserByApiToken(bearer[1]);
+      req.viaApiToken = Boolean(req.user);
+      if (!req.user && req.path.startsWith('/api/')) {
+        return res.status(401).json({ error: 'API Token 无效或已撤销' });
+      }
+    } else {
+      req.user = store.getUserBySessionToken(cookieValue(req, SESSION_COOKIE));
+    }
   } catch (error) {
     console.warn('Session lookup skipped:', error.message || error);
     req.user = null;
@@ -100,6 +150,7 @@ app.use((req, res, next) => {
 });
 
 let refreshing = false;
+app.use((req, res, next) => runWithAiActor(req.user ? `user:${req.user.id}` : 'anonymous', next));
 let refreshProgress = { done: 0, total: 0 };
 let refreshWorker = null;
 let refreshJob = null;
@@ -108,6 +159,7 @@ let aiWorker = null;
 let aiJob = null;
 let aiLast = null;
 const aiQueuedSourceIds = new Set();
+const refreshQueuedSourceIds = new Set();
 let autoRewriteRunning = false;
 let autoRewriteLast = null;
 let autoRewriteWindowAttemptKey = '';
@@ -118,16 +170,21 @@ const FAVICON_MAX_BYTES = 256 * 1024;
 const FAVICON_CACHE_MAX_ENTRIES = 512;
 const FAVICON_TOTAL_TIMEOUT_MS = 6000;
 const FAVICON_MAX_INFLIGHT = 64;
-const RATE_LIMIT_MAX_BUCKETS = 2048;
+const RATE_LIMIT_MAX_BUCKETS = 50000;
 
 function createRateLimiter({ windowMs, max, message, key: keyForRequest = null }) {
   const buckets = new Map();
+  const sweep = setInterval(() => {
+    const t = Date.now();
+    for (const [key, bucket] of buckets) if (t - bucket.startedAt >= windowMs) buckets.delete(key);
+  }, Math.min(windowMs, 60 * 1000));
+  if (sweep.unref) sweep.unref();
   return (req, res, next) => {
     const now = Date.now();
     const key = String(
       typeof keyForRequest === 'function'
         ? keyForRequest(req)
-        : (req.ip || req.socket.remoteAddress || 'unknown')
+        : clientIp(req)
     );
     let bucket = buckets.get(key);
     if (!bucket || now - bucket.startedAt >= windowMs) {
@@ -157,6 +214,36 @@ const submitLinkDailyRateLimit = createRateLimiter({
   message: '每天最多收录 20 个链接，请明天再试',
   key: req => `user:${req.user && req.user.id || 'anonymous'}`,
 });
+const clipperHourlyRateLimit = createRateLimiter({ windowMs: HOUR_MS, max: 30, message: '每小时最多剪藏 30 篇', key: req => `clipper:${req.ip}:${req.get('X-Qiaomu-Device')}` });
+const clipperDailyRateLimit = createRateLimiter({ windowMs: 24 * HOUR_MS, max: 100, message: '今天剪藏有点多，请明天再试', key: req => `clipper-day:${req.ip}` });
+const clipperGlobalRateLimit = createRateLimiter({ windowMs: HOUR_MS, max: 500, message: '剪藏服务忙，请稍后重试', key: () => 'clipper-global' });
+
+const nativeLinkSubmitRateLimit = createRateLimiter({
+  windowMs: 60 * 60 * 1000,
+  max: 6,
+  message: '每小时最多加入 6 个链接，请稍后再试',
+  key: req => `native:${req.ip || 'unknown'}:${String(req.get('X-QMReader-Device') || '').slice(0, 64)}`,
+});
+const nativeLinkSubmitDailyRateLimit = createRateLimiter({
+  windowMs: 24 * 60 * 60 * 1000,
+  max: 20,
+  message: '今天加入的链接有点多，请明天再试',
+  key: req => `native-day:${req.ip || 'unknown'}`,
+});
+const nativeLinkSubmitGlobalRateLimit = createRateLimiter({
+  windowMs: 24 * 60 * 60 * 1000,
+  max: 100,
+  message: '处理队列忙，请稍后再试',
+  key: () => 'native-global',
+});
+function requireNativeLinkClient(req, res, next) {
+  const client = String(req.get('X-QMReader-Client') || '').trim();
+  const deviceId = String(req.get('X-QMReader-Device') || '').trim().toLowerCase();
+  if (client !== 'ios-native' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(deviceId)) {
+    return res.status(403).json({ error: '这个客户端暂时不能加入链接' });
+  }
+  return next();
+}
 const registerRateLimit = createRateLimiter({
   windowMs: 60 * 60 * 1000,
   max: 5,
@@ -172,6 +259,25 @@ const originalFetchRateLimit = createRateLimiter({
   max: 20,
   message: '原文抓取过于频繁，请稍后再试',
 });
+const podscribeReadRateLimit = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: '播客搜索过于频繁，请稍后再试',
+});
+const podcastSubscribeRateLimit = createRateLimiter({
+  windowMs: 60 * 60 * 1000,
+  max: 12,
+  message: '播客订阅过于频繁，请稍后再试',
+  key: req => `user:${req.user?.id || clientIp(req) || 'anonymous'}`,
+});
+const podscribeRewriteRateLimit = createRateLimiter({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: '每小时最多生成 5 篇乔木转写',
+  key: req => `user:${req.user?.id || 'anonymous'}`,
+});
+const podscribeRewriteCache = new Map();
+const podscribeRewriteJobs = new Map();
 const faviconRateLimit = createRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 240,
@@ -769,6 +875,7 @@ function canonicalUrlForRequest(req, entry, focus = '') {
 }
 
 function shouldNoindexRequest(req, entry) {
+  if (['/me', '/dashboard', '/admin', '/podscribe'].includes(req.path.replace(/\/$/, ''))) return true;
   if (String(req.query.q || '').trim()) return true;
   if (entry && !hasPublicAssets(entry)) return true;
   return false;
@@ -1684,15 +1791,76 @@ function renderSitemap(req) {
   ].join('\n');
 }
 
+// Versioned assets are cached as immutable for a year, so a hand-edited ?v=
+// that is not bumped strands returning readers on old code. Derive each local
+// script/style version from its content instead (files only change on deploy).
+const assetVersions = new Map();
+function assetVersion(file) {
+  if (!assetVersions.has(file)) {
+    try {
+      assetVersions.set(file, crypto.createHash('sha256').update(fs.readFileSync(path.join(__dirname, 'public', file))).digest('hex').slice(0, 12));
+    } catch {
+      assetVersions.set(file, '');
+    }
+  }
+  return assetVersions.get(file);
+}
+
+function withContentVersions(html) {
+  return html.replace(/(src|href)="\/([a-z0-9_-]+\.(?:js|css))\?v=[^"]*"/gi, (match, attr, file) => {
+    if (file === 'purify.min.js') return match;
+    const version = assetVersion(file);
+    return version ? `${attr}="/${file}?v=${version}"` : match;
+  });
+}
+
+// Public content is identical for readers and bots; no user-agent branching.
+function renderPublicSummary(req, entry) {
+  if (shouldNoindexRequest(req, null)) return '';
+  if (!entry && req.path !== '/' && !isAssetDirectoryRequest(req)) return '';
+  const link = (url, title) => `<a href="${escapeHtml(url)}">${escapeHtml(title)}</a>`;
+  const nav = `<nav aria-label="公开阅读目录">${link('/assets', '公开阅读资产')} · ${link('/assets/translation', '中文翻译')} · ${link('/assets/rewrite', '中文重写')} · ${link('/contributors', '贡献者')}</nav>`;
+  if (entry) {
+    const focus = requestAssetFocus(req);
+    const sections = (focus ? [focus] : publicAssetTypes(entry)).flatMap(type => {
+      const exact = exactAssetPreview(entry, type, req);
+      const previews = exact ? [exact] : assetFeedPreviews(entry, type, entry.assets?.previews || {}).slice(0, 5);
+      return previews.filter(item => item.text).map(item => `<section><h2>${escapeHtml(ASSET_DIRECTORY_META[type]?.label || '公开资产')}</h2><p>${escapeHtml([item.author, item.model].filter(Boolean).join(' · '))}</p><p class="public-excerpt">${escapeHtml(String(item.text).slice(0, 12000))}</p></section>`);
+    }).join('');
+    const source = absolutePublicUrl(req, entry.link);
+    return `<details class="public-summary" open><summary>文章与公开阅读资产</summary><h1>${escapeHtml(entry.titleZh || entry.title)}</h1><p>${escapeHtml(clipText(entry.summaryZh || entry.summary, 1000))}</p>${/^https?:\/\//.test(source) ? `<p>${link(source, '阅读原文')} · ${escapeHtml(entry.author || sourceNameForEntry(entry))}</p>` : ''}${sections}${nav}</details>`;
+  }
+  const meta = assetDirectoryMeta(req);
+  const entries = (meta?.stats?.entries || assetDirectoryStats().entries).slice(0, 12);
+  return `<details class="public-summary"><summary>公开阅读目录</summary><h1>${escapeHtml(meta?.title || DEFAULT_TITLE)}</h1><p>${escapeHtml(meta?.description || DEFAULT_DESCRIPTION)}</p>${nav}<ul>${entries.map(item => `<li>${link(entryPublicUrl(req, item), item.titleZh || item.title)}</li>`).join('')}</ul></details>`;
+}
+
 function renderIndex(req, entry = null) {
-  const html = fs.readFileSync(INDEX_PATH, 'utf8');
+  const html = withContentVersions(fs.readFileSync(INDEX_PATH, 'utf8'))
+    .replace(/\s*<meta (?:name="(?:description|twitter:[^"]+)"|property="(?:og:|article:)[^"]+")[^>]*\/>/g, '')
+    .replace(/\s*<link rel="canonical"[^>]*\/>/g, '')
+    .replace(/\s*<script type="application\/ld\+json">[\s\S]*?<\/script>/g, '');
   const { title, tags } = socialMetaTags(req, entry);
   const umami = umamiConfigTag(req);
+  // Article data is scoped to this viewer and this no-store HTML response.
+  let bootstrap = '';
+  if (entry) {
+    const route = articleRouteFromRequest(req);
+    const assetId = route?.focus === 'rewrite' ? route.itemId : '';
+    bootstrap = renderArticleBootstrap(articleReadingResponse(entry, req.user, assetId), req.path);
+  }
+  if (!entry && req.path === '/' && !Object.keys(req.query).length) {
+    try {
+      bootstrap = renderReadBootstrap(fetcher.getEntries({ limit: 40, minimal: true, viewer: null, allowedOptInSourceIds: new Set() }).map(mediaListEntry));
+    } catch (error) { console.warn('Public first-list unavailable:', error.message); }
+  }
   return html
     .replace(/src="\/purify\.min\.js\?v=[^"]+"/, `src="/purify.min.js?v=${escapeHtml(DOMPURIFY_VERSION)}"`)
     .replace(/<link rel="alternate" type="application\/rss\+xml" title="[^"]*" href="[^"]*" \/>/, rssAlternateTag(req))
     .replace(/<title>.*?<\/title>/, `<title>${escapeHtml(title)}</title>`)
-    .replace('</head>', `  ${tags}${umami ? `\n  ${umami}` : ''}\n</head>`);
+    .replace('<ul class="reader-empty-keys"', `${renderPublicSummary(req, entry)}<ul class="reader-empty-keys"`)
+    .replace('</head>', `  ${tags}${umami ? `\n  ${umami}` : ''}\n</head>`)
+    .replace('</body>', `${bootstrap}\n</body>`);
 }
 
 function renderLlmsTxt(req) {
@@ -1760,6 +1928,13 @@ function umamiConfigTag(req) {
   return `<meta name="qmreader-analytics" data-src="${escapeHtml(src)}" data-website-id="${escapeHtml(UMAMI_WEBSITE_ID)}" data-domains="${escapeHtml(domain)}" />`;
 }
 
+app.get('/api/version', (_req, res) => {
+  let commit = /^[a-f0-9]{40}$/.test(process.env.QMREADER_COMMIT || '') ? process.env.QMREADER_COMMIT : null;
+  try { const value = fs.readFileSync(path.join(__dirname, 'DEPLOYED_COMMIT'), 'utf8').trim(); if (/^[a-f0-9]{40}$/.test(value)) commit = value; } catch {}
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ version: require('./package.json').version, commit });
+});
+
 app.get('/purify.min.js', (req, res) => {
   const versioned = String(req.query.v || '') === DOMPURIFY_VERSION;
   res.setHeader('Cache-Control', versioned
@@ -1769,12 +1944,30 @@ app.get('/purify.min.js', (req, res) => {
   res.type('application/javascript').sendFile(DOMPURIFY_PATH);
 });
 
+// The anonymous home page embeds the public first list; rebuilding it costs a
+// list query on every visit, so reuse it until the data changes or 10s pass.
+let homePageCache = null;
+function anonymousHomePage(req) {
+  const key = `${req.protocol}|${req.get('host') || ''}`;
+  const stamp = dataStamp();
+  const now = Date.now();
+  if (homePageCache && homePageCache.key === key && homePageCache.stamp === stamp && homePageCache.until > now) {
+    return homePageCache.html;
+  }
+  const html = renderIndex(req, null);
+  homePageCache = { key, stamp, html, until: now + 10000 };
+  return html;
+}
+
+app.get('/index.html', (req, res) => res.redirect(301, '/'));
+
 app.get('/', (req, res) => {
   const entryId = String(req.query.entry || '').trim();
   const entry = entryId ? fetcher.getEntryById(entryId) : null;
   if (entry) return res.redirect(301, entryPublicUrl(req, entry));
   res.setHeader('Cache-Control', 'no-cache');
-  res.type('html').send(renderIndex(req, entry));
+  const cacheable = !req.user && !Object.keys(req.query).length;
+  res.type('html').send(cacheable ? anonymousHomePage(req) : renderIndex(req, entry));
 });
 
 app.get(/^\/articles\/.+$/, (req, res) => {
@@ -1785,7 +1978,7 @@ app.get(/^\/articles\/.+$/, (req, res) => {
   if (normalizePathForCompare(req.path) !== normalizePathForCompare(canonicalPath)) {
     return res.redirect(301, publicUrl(req, canonicalPath));
   }
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'private, no-store');
   res.type('html').send(renderIndex(req, entry));
 });
 
@@ -1899,13 +2092,35 @@ app.get('/contributors/:id', (req, res) => {
 });
 
 app.get(['/me', '/dashboard', '/admin'], (req, res) => {
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  res.type('html').send(renderIndex(req));
+});
+
+app.get('/podscribe', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.type('html').send(renderIndex(req));
 });
 
+app.get('/privacy', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(path.join(__dirname, 'public', 'privacy.html'));
+});
+
+app.get('/support', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(path.join(__dirname, 'public', 'support.html'));
+});
+
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders(res, file) {
-    if (file.endsWith('.html')) {
+    if (file.endsWith('sw.js')) {
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Service-Worker-Allowed', '/');
+    } else if (file.endsWith('.webmanifest')) {
+      res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+    } else if (file.endsWith('.html')) {
       res.setHeader('Cache-Control', 'no-cache');
     } else if (/\.(?:css|js)$/.test(file)) {
       const versioned = /(?:\?|&)v=[^&]+/.test(String(res.req && res.req.originalUrl || ''));
@@ -1953,6 +2168,7 @@ function clearSessionCookie(req, res) {
 
 function sendError(res, error, fallback = 'request failed') {
   const status = error.statusCode || 500;
+  if (error.retryAfter) res.setHeader('Retry-After', String(error.retryAfter));
   res.status(status).json({ error: error.message || fallback });
 }
 
@@ -1982,6 +2198,11 @@ function requireAdmin(req, res, next) {
   res.status(403).json({ error: '需要管理员权限' });
 }
 
+require('./lib/qiaomu-clipper').mountClipper(app, { store, rateLimit: clipperHourlyRateLimit, dailyRateLimit: clipperDailyRateLimit, globalRateLimit: clipperGlobalRateLimit, onAccepted: entry => entry.titleZh ? null : translateSubmittedTitle(entry) });
+
+mountPodcastNotes(app, requireAdmin, fetcher);
+mountYoutubeNotes(app, requireAdmin, fetcher);
+
 function requestAuthor(req) {
   return req.user ? req.user.displayName : '读者';
 }
@@ -2008,6 +2229,9 @@ function entryPlainText(entry) {
 
 function shouldAutoFetchOriginal(entry) {
   if (!entry || !/^https?:\/\//i.test(entry.link || '')) return false;
+  if (entry.sourceId === 'user-submitted' && store.getEntrySignals([entry.id])[entry.id]?.some(signal => signal.provider === 'submitted-content')) return false;
+  if (podcastTranscript.isTranscriptPodcast(entry)) return false;
+  if (entry.sourceId === 'allin' || entry.sourceId === 'joerogan') return false;
   if (entry.sourceId === 'hackernews') {
     return !entry.originalFetchedAt && !/news\.ycombinator\.com\/item\?/i.test(entry.link || '');
   }
@@ -2084,6 +2308,20 @@ function translationResponse(entry, viewer = null, assetId = '') {
   };
 }
 
+function rewriteReadingState(entry, rewrite, assetId = '') {
+  const source = fetcher.getSourceById(entry.sourceId);
+  const automatic = Boolean(autoRewritePolicy.autoRewriteContentEnabled() && source &&
+    fetcher.isEnabled(source) && fetcher.isAutoRewriteEnabled(source) && source.autoRewrite !== false && deepseek.getConfig().configured);
+  return readingAssetState({ asset: rewrite, automatic, exactAsset: Boolean(assetId),
+    job: rewrite?.body || assetId ? null : store.getRewriteStatusSummaries([entry.id])[entry.id] });
+}
+
+function articleReadingResponse(entry, viewer = null, assetId = '') {
+  const rewrite = rewriteResponse(entry, viewer, assetId);
+  return { entry: wechatImages.rewriteEntry(entry), rewrite, rewriteAssetId: assetId || '',
+    readingState: { rewrite: rewriteReadingState(entry, rewrite, assetId) } };
+}
+
 function rewriteResponse(entry, viewer = null, assetId = '') {
   const exactAssetId = String(assetId || '').trim();
   const rewrite = exactAssetId
@@ -2092,25 +2330,33 @@ function rewriteResponse(entry, viewer = null, assetId = '') {
   if (rewrite && exactAssetId && rewrite.entryId !== entry.id) return null;
   if (!rewrite) return null;
   const contentHash = deepseek.rewriteContentHash(entry);
+  // Same currency rule as generation, so legacy v1 podcast hashes stay visible.
+  const current = deepseek.rewriteIsCurrent(rewrite, entry, contentHash);
+  if (podcastTranscript.isTranscriptPodcast(entry) &&
+      (!podcastTranscript.loadReadyTranscript(entry) || !current)) return null;
+  if (podscribeEntry.isPodscribeEntry(entry) &&
+      (!podscribeEntry.loadReady(entry) || !current)) return null;
   const reaction = store.getEntryAssetReaction(entry.id, 'rewrite', viewer, exactAssetId);
   const stale = entry && entry.sourceId === 'producthunt'
     ? !/^ph-official-v2:[a-f0-9]+$/i.test(String(rewrite.contentHash || ''))
-    : Boolean(rewrite.contentHash && rewrite.contentHash !== contentHash);
+    : Boolean(rewrite.contentHash && !current);
   return {
     ...rewrite,
+    ...(podcastTranscript.isTranscriptPodcast(entry) ? { body: podcastTranscript.stripAudioTimestamps(rewrite.body) } : {}),
     ...reaction,
     stale,
   };
 }
 
 async function translateMissingTitles(limit = TITLE_TRANSLATION_LIMIT) {
+  const options = autoRewritePolicy.serverAiOptions();
   if (!deepseek.getConfig().configured) return 0;
   const entries = fetcher.getEntries({ limit: 1000 })
     .filter(entry => deepseek.needsTitleTranslation(entry.title) && !entry.titleZh)
     .slice(0, limit);
   let translated = 0;
   for (let i = 0; i < entries.length; i += 20) {
-    const result = await deepseek.translateTitleBatch(entries.slice(i, i + 20), { author: 'system' });
+    const result = await deepseek.translateTitleBatch(entries.slice(i, i + 20), { ...options, author: 'system' });
     translated += result.translations.length;
   }
   return translated;
@@ -2119,7 +2365,7 @@ async function translateMissingTitles(limit = TITLE_TRANSLATION_LIMIT) {
 async function translateSubmittedTitle(entry) {
   if (!entry || !entry.id || !deepseek.getConfig().configured || !deepseek.needsTitleTranslation(entry.title)) return null;
   try {
-    const result = await deepseek.translateTitleBatch([entry], { author: 'system' });
+    const result = await deepseek.translateTitleBatch([entry], { ...autoRewritePolicy.serverAiOptions(), author: 'system' });
     return result.translations && result.translations[0] ? result.translations[0] : null;
   } catch (error) {
     console.warn(`Submit link title translation skipped for ${entry.id}:`, error.message || error);
@@ -2128,12 +2374,14 @@ async function translateSubmittedTitle(entry) {
 }
 
 function queueSubmittedRewrite(entry) {
+  if (!autoRewritePolicy.autoRewriteContentEnabled()) return;
   if (!entry || !entry.id || !deepseek.getConfig().configured) return;
   setTimeout(async () => {
     try {
       const latest = fetcher.getEntryById(entry.id) || entry;
       const prepared = await prepareEntryForAiAsset(latest, 'Submitted link rewrite');
       await deepseek.rewriteEntry(prepared.entry, {
+        ...autoRewritePolicy.serverAiOptions(process.env, { autoRewrite: true }),
         author: '向阳乔木',
         temperature: 0.6,
         maxTokens: 9000,
@@ -2174,6 +2422,14 @@ function seedAdminFromEnv() {
   }
 }
 
+// Fetch and AI workers (and the per-source children they fork, which inherit
+// the niceness) yield the CPU to page and API requests on a contended host.
+function lowerWorkerPriority(worker) {
+  if (!Number.isFinite(WORKER_NICENESS) || WORKER_NICENESS <= 0 || !worker.pid) return;
+  try { os.setPriority(worker.pid, Math.min(19, WORKER_NICENESS)); }
+  catch (error) { console.warn('Worker priority unchanged:', error.message || error); }
+}
+
 function normalizeBackgroundJob(job = {}) {
   const kind = String(job.kind || 'refresh').trim();
   const sourceId = String(job.sourceId || '').trim();
@@ -2187,6 +2443,8 @@ function normalizeBackgroundJob(job = {}) {
     sourceIds,
     reason,
     fetchOnly: Boolean(job.fetchOnly),
+    catchup: Boolean(job.catchup),
+    queue: Boolean(job.queue),
     requestedAt: Date.now(),
   };
 }
@@ -2246,6 +2504,7 @@ function backgroundJobState() {
       job: refreshJob,
       last: refreshLast,
       progress: refreshProgress,
+      queuedSourceIds: Array.from(refreshQueuedSourceIds),
     },
     ai: {
       running: Boolean(aiWorker),
@@ -2280,8 +2539,10 @@ function queueAutoRewriteForRefresh(refresh, job = {}) {
   const allowed = new Set(defaultAutoRewriteSourceIds());
   const sourceIds = autoRewriteSourceIdsFromRefresh(refresh, job).filter(id => allowed.has(id));
   if (!sourceIds.length) return { started: false, skipped: 'no changed sources' };
+  // The fetch worker already wrote the jobs to SQLite; this only drains them.
   return startAutoRewriteJob({
     kind: 'auto-rewrite',
+    queue: true,
     sourceIds,
     reason: `after-${job.reason || 'refresh'}`,
   });
@@ -2312,6 +2573,15 @@ function finishFetchJob({ result = null, error = null, code = 0, signal = '' } =
   refreshWorker = null;
   refreshJob = null;
   reloadFetcherAfterWorker();
+  if (refreshQueuedSourceIds.size) {
+    const queued = Array.from(refreshQueuedSourceIds);
+    refreshQueuedSourceIds.clear();
+    startFetchJob({
+      kind: 'refresh',
+      sourceIds: queued,
+      reason: 'queued-source-interaction',
+    });
+  }
 }
 
 function finishAiJob({ result = null, error = null, code = 0, signal = '' } = {}) {
@@ -2339,6 +2609,7 @@ function finishAiJob({ result = null, error = null, code = 0, signal = '' } = {}
     const queued = Array.from(aiQueuedSourceIds);
     setTimeout(() => startAutoRewriteJob({
       kind: 'auto-rewrite',
+      queue: true,
       sourceIds: queued,
       reason: 'queued',
     }), 0);
@@ -2370,7 +2641,9 @@ function startFetchJob(job = {}) {
     env: { ...process.env, QMREADER_WORKER_KIND: 'fetch' },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
+  lowerWorkerPriority(worker);
   refreshWorker = worker;
+  require('./.rss-reliability/watchdog.cjs').watch(worker);
   let workerResult = null;
   let workerError = null;
 
@@ -2401,7 +2674,6 @@ function startFetchJob(job = {}) {
         }
         refreshing = false;
       }
-      reloadFetcherAfterWorker();
       refreshLast = {
         kind: 'refresh',
         sourceId: refreshJob && refreshJob.sourceId || '',
@@ -2430,7 +2702,7 @@ function startFetchJob(job = {}) {
   worker.on('exit', (code, signal) => {
     const failed = workerError || code;
     if (failed) console.warn('Refresh worker exited with error:', workerError && workerError.message ? workerError.message : code);
-    finishFetchJob({ result: workerResult, error: workerError, code, signal });
+    if (refreshWorker === worker) finishFetchJob({ result: workerResult, error: workerError, code, signal });
   });
   worker.send({ type: 'run', job: normalized });
 
@@ -2487,6 +2759,7 @@ function startAutoRewriteJob(job = {}) {
     env: { ...process.env, QMREADER_WORKER_KIND: 'ai' },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
+  lowerWorkerPriority(worker);
   aiWorker = worker;
   let workerResult = null;
   let workerError = null;
@@ -2535,9 +2808,15 @@ function startAutoRewriteJob(job = {}) {
   worker.on('error', error => {
     workerError = error;
   });
+  const workerPid = worker.pid;
   worker.on('exit', (code, signal) => {
     const failed = workerError || code;
     if (failed) console.warn('AI worker exited with error:', workerError && workerError.message ? workerError.message : code);
+    // Hand a crashed worker's leased job back now instead of after its lease.
+    if (failed || signal) {
+      try { store.releaseRewriteWorker(`ai-${workerPid}`, `AI worker exited (${signal || code})`); }
+      catch (error) { console.warn('Rewrite lease release failed:', error.message || error); }
+    }
     finishAiJob({ result: workerResult, error: workerError, code, signal });
   });
   worker.send({ type: 'run', job: { ...normalized, sourceIds: uniqueSourceIds } });
@@ -2572,9 +2851,6 @@ function triggerSourceInteractionRefresh(sourceId, reason = 'interaction') {
   if (!src) return { started: false, skipped: 'source not found' };
   if (src.manual) return { started: false, skipped: 'manual source' };
   if (!fetcher.isEnabled(src)) return { started: false, skipped: 'source disabled' };
-  if (refreshWorker) {
-    return { started: false, running: true, skipped: 'refresh already running', job: refreshJob };
-  }
   const cooldown = Number.isFinite(SOURCE_INTERACTION_REFRESH_COOLDOWN_MS)
     ? Math.max(0, SOURCE_INTERACTION_REFRESH_COOLDOWN_MS)
     : 15 * 60 * 1000;
@@ -2582,6 +2858,17 @@ function triggerSourceInteractionRefresh(sourceId, reason = 'interaction') {
   const last = sourceInteractionRefreshAt.get(id) || 0;
   if (cooldown && now - last < cooldown) {
     return { started: false, skipped: 'cooldown', nextAllowedAt: last + cooldown };
+  }
+  if (refreshWorker) {
+    refreshQueuedSourceIds.add(id);
+    sourceInteractionRefreshAt.set(id, now);
+    return {
+      started: false,
+      running: true,
+      queued: true,
+      skipped: 'refresh queued',
+      job: refreshJob,
+    };
   }
   const result = startBackgroundJob({
     kind: 'refresh',
@@ -2706,6 +2993,26 @@ function scheduleStartupRefresh() {
   }, delay);
 }
 
+function triggerRewriteCatchup() {
+  // Never queue behind a running job: the next tick finds the same backlog.
+  if (aiWorker) return { started: false, skipped: 'AI worker busy' };
+  if (!deepseek.getConfig().configured) return { started: false, skipped: 'AI not configured' };
+  return startAutoRewriteJob({ kind: 'auto-rewrite', catchup: true, reason: 'rewrite-catchup' });
+}
+
+function scheduleRewriteCatchup() {
+  if (!Number.isFinite(REWRITE_CATCHUP_INTERVAL_MS) || REWRITE_CATCHUP_INTERVAL_MS < 0) {
+    console.log('Rewrite catch-up disabled');
+    return;
+  }
+  const interval = Math.max(MINUTE_MS, REWRITE_CATCHUP_INTERVAL_MS);
+  const delay = Number.isFinite(REWRITE_CATCHUP_STARTUP_DELAY_MS) ? Math.max(0, REWRITE_CATCHUP_STARTUP_DELAY_MS) : 4 * MINUTE_MS;
+  setTimeout(() => {
+    triggerRewriteCatchup();
+    setInterval(triggerRewriteCatchup, interval);
+  }, delay);
+}
+
 function scheduleFreshnessRefresh() {
   if (!Number.isFinite(FRESHNESS_SWEEP_INTERVAL_MS) || FRESHNESS_SWEEP_INTERVAL_MS < 0) {
     console.log('Freshness sweep disabled');
@@ -2743,10 +3050,107 @@ function scheduleAutoRewriteWindow() {
   }, delay);
 }
 
+app.get('/api/podscribe/search', podscribeReadRateLimit, async (req, res) => {
+  try { res.json(await podscribe.search(req.query.q)); }
+  catch (error) { sendError(res, error, '播客搜索失败'); }
+});
+
+app.get('/api/wechat/catalog', podscribeReadRateLimit, async (req, res) => {
+  try {
+    const records = await wechatCatalog.catalog();
+    const q = String(req.query.q || '').trim().toLocaleLowerCase().slice(0, 100);
+    const accounts = q ? records.filter(item => item.name.toLocaleLowerCase().includes(q)) : records;
+    res.json({ total: records.length, accounts });
+  } catch (error) { sendError(res, error, '获取微信公众号目录失败'); }
+});
+
+app.post('/api/wechat/subscribe', requireLogin, podcastSubscribeRateLimit, async (req, res) => {
+  try {
+    const id = String(req.body?.id || '');
+    if (!wechatCatalog.feedUrl(id)) return res.status(400).json({ error: '公众号标识无效' });
+    const record = (await wechatCatalog.catalog()).find(item => item.id === id);
+    if (!record) return res.status(404).json({ error: '该公众号不在 BestBlogs 目录中' });
+    const existing = SOURCES.find(item => item.bestblogsWechatId === id);
+    const source = registerWechatSource(record);
+    if (!existing) startBackgroundJob({ kind: 'refresh', sourceId: source.id, sourceIds: [source.id] });
+    res.status(existing ? 200 : 201).json({ source: { id: source.id, name: source.name }, added: !existing });
+  } catch (error) { sendError(res, error, '订阅微信公众号失败'); }
+});
+
+app.post('/api/podscribe/subscribe', requireLogin, podcastSubscribeRateLimit, async (req, res) => {
+  try {
+    const slug = String(req.body?.slug || '');
+    if (!podscribe.validSlug(slug)) return res.status(400).json({ error: '播客标识无效' });
+    const existing = fetcher.getSourceById(`podscribe-${slug}`);
+    if (existing) return res.json({ source: existing, added: false });
+    const requestedName = String(req.body?.name || '').trim();
+    const matches = await podscribe.search(requestedName || slug.replace(/-/g, ' '));
+    const show = matches.podcasts.find(item => item.slug === slug);
+    if (!show) return res.status(404).json({ error: '未找到该播客，请重新搜索' });
+    const page = await podscribe.episodes(slug, 1);
+    if (!page.episodes.length) return res.status(409).json({ error: '该节目暂没有可阅读的单集' });
+    const source = registerPodcastSource({ slug, name: show.name, nameZh: req.body?.nameZh });
+    startBackgroundJob({ kind: 'refresh', sourceId: source.id, sourceIds: [source.id] });
+    res.status(201).json({ source, added: true });
+  } catch (error) { sendError(res, error, '订阅播客失败'); }
+});
+
+app.get('/api/podscribe/podcasts/:showSlug/episodes', podscribeReadRateLimit, async (req, res) => {
+  try { res.json(await podscribe.episodes(req.params.showSlug, Number(req.query.page || 1))); }
+  catch (error) { sendError(res, error, '获取单集失败'); }
+});
+
+app.get('/api/podscribe/episodes/:showSlug/:episodeSlug/transcript', podscribeReadRateLimit, async (req, res) => {
+  try { res.json(await podscribe.transcript(req.params.showSlug, req.params.episodeSlug)); }
+  catch (error) { sendError(res, error, '获取源文稿失败'); }
+});
+
+app.post('/api/podscribe/episodes/:showSlug/:episodeSlug/rewrite', requireAdmin, podscribeRewriteRateLimit, async (req, res) => {
+  try {
+    const data = await podscribe.transcript(req.params.showSlug, req.params.episodeSlug);
+    const transcript = data.transcript.segments.map(segment => segment.text).filter(Boolean).join('\n');
+    const hash = crypto.createHash('sha256').update(transcript).digest('hex');
+    const config = requestAiConfig(req);
+    const key = `${req.params.showSlug}/${req.params.episodeSlug}:${hash}:${config.provider}:${config.model}:${config.baseUrl}`;
+    if (podscribeRewriteCache.has(key)) return res.json({ ...podscribeRewriteCache.get(key), cached: true });
+    const running = [...podscribeRewriteJobs.values()].find(job => job.key === key && job.userId === req.user.id && job.status === 'running');
+    if (running) return res.status(202).json({ jobId: running.id, status: 'running' });
+    const job = { id: crypto.randomUUID(), key, userId: req.user.id, status: 'running', createdAt: Date.now() };
+    podscribeRewriteJobs.set(job.id, job);
+    if (podscribeRewriteJobs.size > 40) {
+      const oldest = [...podscribeRewriteJobs.values()].find(item => item.status !== 'running');
+      if (oldest) podscribeRewriteJobs.delete(oldest.id);
+    }
+    void deepseek.rewritePodscribeEpisode(data.episode, transcript, config).then(rewrite => {
+      const result = { rewrite, sourceUrl: data.episode.url, transcriptHash: hash, cached: false };
+      if (podscribeRewriteCache.size >= 24) podscribeRewriteCache.delete(podscribeRewriteCache.keys().next().value);
+      podscribeRewriteCache.set(key, result);
+      job.status = 'complete';
+      job.result = result;
+    }).catch(error => {
+      job.status = 'failed';
+      job.error = String(error.message || error).slice(0, 300);
+      console.warn('Podscribe rewrite failed:', job.error);
+    });
+    res.status(202).json({ jobId: job.id, status: 'running' });
+  } catch (error) { sendError(res, error, '乔木转写失败'); }
+});
+
+app.get('/api/podscribe/rewrite-jobs/:jobId', requireAdmin, (req, res) => {
+  const job = podscribeRewriteJobs.get(req.params.jobId);
+  if (!job || job.userId !== req.user.id) return res.status(404).json({ error: '转写任务不存在' });
+  res.json({ status: job.status, result: job.result || null, error: job.error || null });
+});
+
+app.use(require('./.rss-reliability/health.cjs').middleware(fetcher, backgroundJobState));
+
+const publicApiCache = createResponseCache({ ttlMs: 10000, max: 300 });
+
 app.get('/api/sources', (req, res) => {
   const policy = autoRewritePolicyState();
-  res.json({
-    sources: fetcher.getSourcesMeta(),
+  const requireRewrite = req.query.ready === 'rewrite';
+  const entry = publicApiCache.get(`sources|${requireRewrite}`, () => ({
+    sources: fetcher.getSourcesMeta({ requireRewrite }),
     refreshing,
     progress: refreshProgress,
     autoRewrite: {
@@ -2756,7 +3160,8 @@ app.get('/api/sources', (req, res) => {
       policy,
     },
     backgroundJob: backgroundJobState(),
-  });
+  }));
+  sendCached(req, res, entry, { shared: !req.user, maxAge: 3, sMaxAge: 10, swr: 30 });
 });
 
 app.get('/api/admin/sources', requireAdmin, (req, res) => {
@@ -2804,6 +3209,17 @@ app.post('/api/sources/:id/refresh-hint', (req, res) => {
     res.json({ ok: true, refresh });
   } catch (e) {
     sendError(res, e, 'source refresh hint failed');
+  }
+});
+
+app.post('/api/refresh-hint', (req, res) => {
+  try {
+    // Public clients may ask for freshness, but the server still decides the
+    // stale sources, batch size, cost ceiling and single-worker concurrency.
+    const refresh = triggerFreshnessRefresh();
+    res.json({ ok: true, refresh });
+  } catch (e) {
+    sendError(res, e, 'refresh hint failed');
   }
 });
 
@@ -2888,6 +3304,50 @@ app.post('/api/auth/logout', (req, res) => {
   store.deleteSession(cookieValue(req, SESSION_COOKIE));
   clearSessionCookie(req, res);
   res.json({ ok: true });
+});
+
+app.get('/api/me/tokens', requireLogin, (req, res) => {
+  res.json({ tokens: store.listApiTokens(req.user.id) });
+});
+
+app.post('/api/me/tokens', requireLogin, (req, res) => {
+  // Tokens can only be minted from a browser session, never with another token.
+  if (req.viaApiToken) return res.status(403).json({ error: '请在网页登录状态下创建 Token' });
+  try {
+    res.status(201).json(store.createApiToken(req.user.id, req.body && req.body.name));
+  } catch (e) {
+    sendError(res, e, 'create token failed');
+  }
+});
+
+app.delete('/api/me/tokens/:id', requireLogin, (req, res) => {
+  if (!store.revokeApiToken(req.user.id, req.params.id)) return res.status(404).json({ error: 'token not found' });
+  res.json({ ok: true });
+});
+
+apiV1.mount(app, {
+  fetcher,
+  store,
+  createRateLimiter,
+  clientIp,
+  requireLogin,
+  entryByIdOrPrefix,
+  rewriteContent: entry => wechatImages.rewriteEntry(entry),
+  translationResponse,
+  rewriteResponse,
+  rewriteReadingState,
+  publicUrl: entry => entryPublicPath(entry, '', '', { includeHash: false }),
+  sourcesMeta: () => fetcher.getSourcesMeta(),
+});
+
+app.get('/healthz', (req, res) => {
+  try {
+    store.getDeletedIdsProbe();
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ok: true, uptime: Math.round(process.uptime()), rss: process.memoryUsage().rss });
+  } catch (e) {
+    res.status(503).json({ ok: false });
+  }
 });
 
 app.get('/api/me/entry-states', requireLogin, (req, res) => {
@@ -3081,7 +3541,7 @@ app.post('/api/me/entry-state', requireLogin, (req, res) => {
       starred: typeof starred === 'boolean' ? starred : undefined,
       viewed: typeof viewed === 'boolean' ? viewed : undefined,
     });
-    res.json({ entryState, stats: store.getEntryStats([entry.id], req.user)[entry.id] });
+    res.json({ entryState, stats: store.getEntryStats([entry.id], req.user, { includeHeat: true })[entry.id] });
   } catch (e) {
     sendError(res, e, 'entry state update failed');
   }
@@ -3098,6 +3558,66 @@ app.post('/api/me/entry-states/read', requireLogin, (req, res) => {
   } catch (e) {
     sendError(res, e, 'entry states update failed');
   }
+});
+
+const aiOAuth = createAiOAuth({ store, secretBox: createSecretBox() });
+deepseek.setOAuthResolver((accountId, userId) => aiOAuth.resolveAccess(accountId, userId));
+
+function aiOAuthOrigin(req) {
+  const configured = String(process.env.AI_OAUTH_PUBLIC_URL || '').trim();
+  if (configured) return configured;
+  return `${req.protocol}://${req.get('host')}`;
+}
+
+app.get('/api/ai/oauth/status', requireLogin, (req, res) => {
+  res.json({ ...aiOAuth.status(), accounts: aiOAuth.listAccounts(req.user.id) });
+});
+
+app.post('/api/ai/oauth/start', requireLogin, (req, res) => {
+  try {
+    res.json(aiOAuth.start(String(req.body && req.body.kind || ''), { userId: req.user.id, origin: aiOAuthOrigin(req) }));
+  } catch (e) {
+    sendError(res, e, 'sign-in start failed');
+  }
+});
+
+app.post('/api/ai/oauth/finish', requireLogin, async (req, res) => {
+  try {
+    const result = await aiOAuth.finish({
+      kind: String(req.body && req.body.kind || ''),
+      callbackUrl: String(req.body && req.body.callbackUrl || ''),
+    }, { userId: req.user.id });
+    res.json(result);
+  } catch (e) {
+    sendError(res, e, 'sign-in failed');
+  }
+});
+
+// Landing page for providers that accept an https redirect (OpenRouter, TokenDance).
+app.get('/api/ai/oauth/callback', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const page = (message, resultId = '') => res.type('html').send(`<!doctype html><meta charset="utf-8"><title>AI 授权</title>
+<body style="font:15px system-ui;padding:32px;color:#222"><p>${escapeHtml(message)}</p>
+<script>try{if(window.opener){window.opener.postMessage({type:'qm-ai-oauth',resultId:${JSON.stringify(resultId)}},location.origin)}}catch(e){}${resultId ? 'setTimeout(function(){window.close()},600)' : ''}</script></body>`);
+  if (!req.user) return page('请先在 QMReader 登录后重新授权。');
+  try {
+    const result = await aiOAuth.finish({ callbackUrl: `${aiOAuthOrigin(req)}${req.originalUrl}` }, { userId: req.user.id });
+    page('授权完成，可以关闭此窗口。', aiOAuth.stash(req.user.id, result));
+  } catch (e) {
+    page(e.message || '授权失败');
+  }
+});
+
+app.post('/api/ai/oauth/claim', requireLogin, (req, res) => {
+  try {
+    res.json(aiOAuth.claim(String(req.body && req.body.resultId || ''), req.user.id));
+  } catch (e) {
+    sendError(res, e, 'claim failed');
+  }
+});
+
+app.delete('/api/ai/oauth/accounts/:id', requireLogin, (req, res) => {
+  res.json({ ok: aiOAuth.removeAccount(req.params.id, req.user.id) });
 });
 
 app.post('/api/ai/models', requireLogin, async (req, res) => {
@@ -3120,21 +3640,60 @@ app.post('/api/ai/test', requireLogin, async (req, res) => {
 
 // List endpoint omits full content to keep the payload small; fetch it per-entry on open.
 app.get('/api/entries', (req, res) => {
-  const { source, category, q, limit } = req.query;
-  const entries = fetcher.getEntries({
-    sourceId: source || undefined,
-    category: category || undefined,
-    q: q || undefined,
-    limit: limit ? parseInt(limit, 10) : undefined,
+  // qrs-prepared-list-v2: variants must not share payloads or validators.
+  const compact = req.get('X-Rss-List') === 'reader-v1';
+  const { source, category, q, limit, ready } = req.query;
+  const sort = req.query.sort === 'hot' ? 'hot' : 'latest';
+  const summary = ['minimal', 'compact'].includes(req.query.summary) ? req.query.summary : 'full';
+  const optIn = [...new Set(String(req.query.optIn || '').split(',').filter(Boolean))].sort();
+  const parsedLimit = limit ? Math.min(1000, Math.max(1, parseInt(limit, 10) || 0)) || undefined : undefined;
+  const key = JSON.stringify(['entries', sort, source || '', category || '', String(q || '').slice(0, 100), parsedLimit || '', optIn, ready === 'rewrite', compact, summary]);
+  // The shared list is cached for a few seconds; only the viewer's own reaction is added per request.
+  const shared = publicApiCache.get(key, () => ({
+    entries: fetcher.getEntries({
+      sourceId: source || undefined,
+      category: category || undefined,
+      q: q ? String(q).slice(0, 100) : undefined,
+      limit: parsedLimit,
+      sort,
+      viewer: null,
+      compact: compact || summary === 'compact', minimal: compact || summary === 'minimal',
+      allowedOptInSourceIds: new Set(optIn),
+      requireRewrite: ready === 'rewrite',
+    }).map(entry => compact ? compactEntry(mediaListEntry(entry)) : mediaListEntry(entry)),
+  }));
+  if (!req.user) return sendCached(req, res, shared, { shared: true, maxAge: 3, sMaxAge: 10, swr: 30 });
+  const mine = store.getViewerReactions(shared.payload.entries.map(entry => entry.id), req.user.id);
+  const entries = shared.payload.entries.map(entry => (
+    mine[entry.id] && entry.stats ? { ...entry, stats: { ...entry.stats, reactionByMe: mine[entry.id] } } : entry
+  ));
+  res.setHeader('Cache-Control', 'private, no-cache');
+  return res.json({ entries });
+});
+
+app.get('/api/sources/:id/entries', (req, res) => {
+  const compact = req.get('X-Rss-List') === 'reader-v1';
+  res.vary('X-Rss-List');
+  const limit = Math.max(1, Math.min(100, Number.parseInt(req.query.limit, 10) || 40));
+  const page = fetcher.getSourceEntryHistory({
+    sourceId: req.params.id,
+    limit,
+    cursor: String(req.query.cursor || ''),
     viewer: req.user,
-  }).map(({ content, ...rest }) => rest);
-  res.json({ entries });
+    requireRewrite: req.query.ready === 'rewrite',
+  });
+  if (!page) return res.status(404).json({ error: 'source not found' });
+  res.json({
+    ...page,
+    entries: page.entries.map(entry => compact ? compactEntry(mediaListEntry(entry)) : mediaListEntry(entry)),
+  });
 });
 
 app.get('/api/entry/:id', (req, res) => {
   const entry = entryByIdOrPrefix(req.params.id, req.user);
   if (!entry) return res.status(404).json({ error: 'entry not found' });
-  res.json({ entry });
+  res.setHeader('Cache-Control', req.user ? 'private, no-store' : 'no-store');
+  res.json(articleReadingResponse(entry, req.user));
 });
 
 app.delete('/api/entry/:id', requireAdmin, (req, res) => {
@@ -3144,6 +3703,7 @@ app.delete('/api/entry/:id', requireAdmin, (req, res) => {
       reason: req.body && req.body.reason,
     });
     if (!result) return res.status(404).json({ error: 'entry not found' });
+    publicApiCache.clear();
     res.json({ ok: true, entryId: result.id, deletedAt: result.deletedAt || null, alreadyDeleted: Boolean(result.alreadyDeleted) });
   } catch (e) {
     sendError(res, e, 'delete entry failed');
@@ -3156,7 +3716,7 @@ app.post('/api/entry/:id/view', (req, res) => {
   try {
     store.recordEntryView(entry.id);
     triggerSourceInteractionRefresh(entry.sourceId, 'entry-view');
-    res.json({ stats: store.getEntryStats([entry.id], req.user)[entry.id] });
+    res.json({ stats: store.getEntryStats([entry.id], req.user, { includeHeat: true })[entry.id] });
   } catch (e) {
     sendError(res, e, 'record entry view failed');
   }
@@ -3167,7 +3727,8 @@ app.post('/api/entry/:id/reaction', requireLogin, (req, res) => {
   if (!entry) return res.status(404).json({ error: 'entry not found' });
   try {
     const reaction = String((req.body && req.body.reaction) || '').trim().toLowerCase();
-    const stats = store.setEntryReaction(entry.id, req.user.id, reaction);
+    store.setEntryReaction(entry.id, req.user.id, reaction);
+    const stats = store.getEntryStats([entry.id], req.user, { includeHeat: true })[entry.id];
     if (reaction) {
       notifyTarget(store.getEntrySubmissionOwner(entry.id), req.user, {
         type: `entry_${reaction}`,
@@ -3182,18 +3743,70 @@ app.post('/api/entry/:id/reaction', requireLogin, (req, res) => {
   }
 });
 
+// Mount after JSON parsing and before routes. Uses QMReader's existing SSRF/redirect checks.
+require('./lib/lab-moderation').mountLabModeration(app, {
+  store, deleteEntry: fetcher.deleteEntry, getSources: fetcher.getSourcesMeta,
+  moveEntry: (id, sourceId, userId) => {
+    const result = require('./lib/entry-placement.cjs').placement(fetcher.getSourceById).move(id, sourceId, userId);
+    publicApiCache.clear(); return result;
+  },
+});
+require('./lib/lab-collection').mountLabCollection(app, {
+  adminAuth: store,
+  directory: path.join(__dirname, 'data'),
+  validateUrl: value => fetcher.__test.validateSubmittedUrlShape(value),
+  processLink: require('./lib/web-collection-process.cjs').createProcessLink({
+    fetcher, deepseek, prepareEntryForAiAsset,
+    collectionTitle: require('./lib/lab-title').collectionTitle,
+  }),
+});
+
 app.post('/api/submit-link', requireLogin, submitLinkRateLimit, submitLinkDailyRateLimit, async (req, res) => {
   const url = String((req.body && req.body.url) || '').trim();
   const note = String((req.body && req.body.note) || '').trim();
   if (!url) return res.status(400).json({ error: '请填写要提交的链接' });
   try {
     const submitter = req.user;
-    const request = await fetcher.queueSubmittedLink(url, submitter, { note });
+    const options = { note, title: req.body.title, markdown: req.body.markdown };
+    if (submitter.role === 'admin') {
+      const existing = fetcher.getSubmittedEntryByUrl(url);
+      const entry = await fetcher.submitLink(url, submitter, options);
+      const rewriteQueued = autoRewritePolicy.autoRewriteContentEnabled() && !rewriteResponse(entry) && deepseek.getConfig().configured;
+      void translateSubmittedTitle(entry);
+      if (rewriteQueued) queueSubmittedRewrite(entry);
+      return res.status(existing ? 200 : 201).json({ pending: false, duplicate: Boolean(existing), entry, rewriteQueued });
+    }
+    const request = await fetcher.queueSubmittedLink(url, submitter, options);
     res.status(202).json({ pending: true, request });
   } catch (e) {
     sendError(res, e, 'submit link failed');
   }
 });
+
+app.post(
+  '/api/links/submit',
+  requireNativeLinkClient,
+  nativeLinkSubmitRateLimit,
+  nativeLinkSubmitDailyRateLimit,
+  nativeLinkSubmitGlobalRateLimit,
+  async (req, res) => {
+    const url = String((req.body && req.body.url) || '').trim();
+    if (!url) return res.status(400).json({ error: '请填写要加入的链接' });
+    try {
+      const existing = fetcher.getSubmittedEntryByUrl(url);
+      if (existing) {
+        if (!rewriteResponse(existing)) queueSubmittedRewrite(existing);
+        return res.json({ accepted: true, duplicate: true, entryId: existing.id, status: 'processing' });
+      }
+      const entry = await fetcher.submitLink(url, { displayName: 'QMReader iOS' });
+      void translateSubmittedTitle(entry);
+      queueSubmittedRewrite(entry);
+      return res.status(202).json({ accepted: true, duplicate: false, entryId: entry.id, status: 'processing' });
+    } catch (e) {
+      return sendError(res, e, 'native link submit failed');
+    }
+  }
+);
 
 app.post('/api/entry/:id/content', originalFetchRateLimit, async (req, res) => {
   const entry = fetcher.getEntryById(req.params.id, req.user);
@@ -3206,10 +3819,22 @@ app.post('/api/entry/:id/content', originalFetchRateLimit, async (req, res) => {
   }
 });
 
+app.get('/api/entry/:id/podscribe-transcript', podscribeReadRateLimit, async (req, res) => {
+  const entry = fetcher.getEntryById(req.params.id, req.user);
+  if (!podscribeEntry.isPodscribeEntry(entry)) return res.status(404).json({ error: '不是支持的播客单集' });
+  try {
+    const note = await podscribeEntry.ensureTranscript(entry);
+    res.json({ transcript: note.transcript, sourceUrl: note.sourceUrl,
+      wordCount: note.transcript.split(/\s+/).length, status: 'source-ready' });
+  } catch (error) { sendError(res, error, '获取播客源文稿失败'); }
+});
+
 app.get('/api/entry/:id/translation', (req, res) => {
   const entry = fetcher.getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'entry not found' });
-  res.json({ translation: translationResponse(entry, req.user, req.query.assetId) });
+  const translation = translationResponse(entry, req.user, req.query.assetId);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ translation, ...readingAssetState({ asset: translation, kind: 'translation' }) });
 });
 
 app.post('/api/entry/:id/translation', requireLogin, async (req, res) => {
@@ -3239,7 +3864,9 @@ app.post('/api/entry/:id/translation', requireLogin, async (req, res) => {
 app.get('/api/entry/:id/rewrite', (req, res) => {
   const entry = fetcher.getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'entry not found' });
-  res.json({ rewrite: rewriteResponse(entry, req.user, req.query.assetId) });
+  const rewrite = rewriteResponse(entry, req.user, req.query.assetId);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ rewrite, ...rewriteReadingState(entry, rewrite, req.query.assetId) });
 });
 
 app.post('/api/entry/:id/rewrite', requireLogin, async (req, res) => {
@@ -3625,7 +4252,7 @@ app.post('/api/sources/:id/toggle', requireAdmin, async (req, res) => {
   res.json({ id: src.id, enabled });
 });
 
-app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, () => {
   console.log(`QMReader listening on http://${HOST}:${PORT}`);
   seedAdminFromEnv();
   fetcher.loadDisk();
@@ -3633,4 +4260,15 @@ app.listen(PORT, HOST, () => {
   scheduleDailyRefresh();
   scheduleFreshnessRefresh();
   scheduleAutoRewriteWindow();
+  scheduleRewriteCatchup();
 });
+
+function shutdown(signal) {
+  console.log(`${signal} received, flushing and shutting down`);
+  server.close();
+  try { store.flushEntryViews(); } catch (error) { console.warn('flush views failed:', error.message || error); }
+  try { fetcher.flushDisk(); } catch (error) { console.warn('flush disk failed:', error.message || error); }
+  setTimeout(() => process.exit(0), 1500).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
