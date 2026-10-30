@@ -874,6 +874,7 @@ function canonicalUrlForRequest(req, entry, focus = '') {
 }
 
 function shouldNoindexRequest(req, entry) {
+  if (['/me', '/dashboard', '/admin', '/podscribe'].includes(req.path.replace(/\/$/, ''))) return true;
   if (String(req.query.q || '').trim()) return true;
   if (entry && !hasPublicAssets(entry)) return true;
   return false;
@@ -1812,8 +1813,32 @@ function withContentVersions(html) {
   });
 }
 
+// Public content is identical for readers and bots; no user-agent branching.
+function renderPublicSummary(req, entry) {
+  if (shouldNoindexRequest(req, null)) return '';
+  if (!entry && req.path !== '/' && !isAssetDirectoryRequest(req)) return '';
+  const link = (url, title) => `<a href="${escapeHtml(url)}">${escapeHtml(title)}</a>`;
+  const nav = `<nav aria-label="公开阅读目录">${link('/assets', '公开阅读资产')} · ${link('/assets/translation', '中文翻译')} · ${link('/assets/rewrite', '中文重写')} · ${link('/contributors', '贡献者')}</nav>`;
+  if (entry) {
+    const focus = requestAssetFocus(req);
+    const sections = (focus ? [focus] : publicAssetTypes(entry)).flatMap(type => {
+      const exact = exactAssetPreview(entry, type, req);
+      const previews = exact ? [exact] : assetFeedPreviews(entry, type, entry.assets?.previews || {}).slice(0, 5);
+      return previews.filter(item => item.text).map(item => `<section><h2>${escapeHtml(ASSET_DIRECTORY_META[type]?.label || '公开资产')}</h2><p>${escapeHtml([item.author, item.model].filter(Boolean).join(' · '))}</p><p class="public-excerpt">${escapeHtml(String(item.text).slice(0, 12000))}</p></section>`);
+    }).join('');
+    const source = absolutePublicUrl(req, entry.link);
+    return `<details class="public-summary" open><summary>文章与公开阅读资产</summary><h1>${escapeHtml(entry.titleZh || entry.title)}</h1><p>${escapeHtml(clipText(entry.summaryZh || entry.summary, 1000))}</p>${/^https?:\/\//.test(source) ? `<p>${link(source, '阅读原文')} · ${escapeHtml(entry.author || sourceNameForEntry(entry))}</p>` : ''}${sections}${nav}</details>`;
+  }
+  const meta = assetDirectoryMeta(req);
+  const entries = (meta?.stats?.entries || assetDirectoryStats().entries).slice(0, 12);
+  return `<details class="public-summary"><summary>公开阅读目录</summary><h1>${escapeHtml(meta?.title || DEFAULT_TITLE)}</h1><p>${escapeHtml(meta?.description || DEFAULT_DESCRIPTION)}</p>${nav}<ul>${entries.map(item => `<li>${link(entryPublicUrl(req, item), item.titleZh || item.title)}</li>`).join('')}</ul></details>`;
+}
+
 function renderIndex(req, entry = null) {
-  const html = withContentVersions(fs.readFileSync(INDEX_PATH, 'utf8'));
+  const html = withContentVersions(fs.readFileSync(INDEX_PATH, 'utf8'))
+    .replace(/\s*<meta (?:name="(?:description|twitter:[^"]+)"|property="(?:og:|article:)[^"]+")[^>]*\/>/g, '')
+    .replace(/\s*<link rel="canonical"[^>]*\/>/g, '')
+    .replace(/\s*<script type="application\/ld\+json">[\s\S]*?<\/script>/g, '');
   const { title, tags } = socialMetaTags(req, entry);
   const umami = umamiConfigTag(req);
   // Article data is scoped to this viewer and this no-store HTML response.
@@ -1832,6 +1857,7 @@ function renderIndex(req, entry = null) {
     .replace(/src="\/purify\.min\.js\?v=[^"]+"/, `src="/purify.min.js?v=${escapeHtml(DOMPURIFY_VERSION)}"`)
     .replace(/<link rel="alternate" type="application\/rss\+xml" title="[^"]*" href="[^"]*" \/>/, rssAlternateTag(req))
     .replace(/<title>.*?<\/title>/, `<title>${escapeHtml(title)}</title>`)
+    .replace('<ul class="reader-empty-keys"', `${renderPublicSummary(req, entry)}<ul class="reader-empty-keys"`)
     .replace('</head>', `  ${tags}${umami ? `\n  ${umami}` : ''}\n</head>`)
     .replace('</body>', `${bootstrap}\n</body>`);
 }
@@ -1931,6 +1957,8 @@ function anonymousHomePage(req) {
   homePageCache = { key, stamp, html, until: now + 10000 };
   return html;
 }
+
+app.get('/index.html', (req, res) => res.redirect(301, '/'));
 
 app.get('/', (req, res) => {
   const entryId = String(req.query.entry || '').trim();
@@ -2063,7 +2091,8 @@ app.get('/contributors/:id', (req, res) => {
 });
 
 app.get(['/me', '/dashboard', '/admin'], (req, res) => {
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   res.type('html').send(renderIndex(req));
 });
 
@@ -2084,7 +2113,13 @@ app.get('/support', (_req, res) => {
 
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders(res, file) {
-    if (file.endsWith('.html')) {
+    if (file.endsWith('sw.js')) {
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Service-Worker-Allowed', '/');
+    } else if (file.endsWith('.webmanifest')) {
+      res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+    } else if (file.endsWith('.html')) {
       res.setHeader('Cache-Control', 'no-cache');
     } else if (/\.(?:css|js)$/.test(file)) {
       const versioned = /(?:\?|&)v=[^&]+/.test(String(res.req && res.req.originalUrl || ''));
@@ -3382,7 +3417,7 @@ app.post('/api/me/entry-state', requireLogin, (req, res) => {
       starred: typeof starred === 'boolean' ? starred : undefined,
       viewed: typeof viewed === 'boolean' ? viewed : undefined,
     });
-    res.json({ entryState, stats: store.getEntryStats([entry.id], req.user)[entry.id] });
+    res.json({ entryState, stats: store.getEntryStats([entry.id], req.user, { includeHeat: true })[entry.id] });
   } catch (e) {
     sendError(res, e, 'entry state update failed');
   }
@@ -3484,10 +3519,11 @@ app.get('/api/entries', (req, res) => {
   // qrs-prepared-list-v2: variants must not share payloads or validators.
   const compact = req.get('X-Rss-List') === 'reader-v1';
   const { source, category, q, limit, ready } = req.query;
+  const sort = req.query.sort === 'hot' ? 'hot' : 'latest';
   const summary = ['minimal', 'compact'].includes(req.query.summary) ? req.query.summary : 'full';
   const optIn = [...new Set(String(req.query.optIn || '').split(',').filter(Boolean))].sort();
   const parsedLimit = limit ? Math.min(1000, Math.max(1, parseInt(limit, 10) || 0)) || undefined : undefined;
-  const key = JSON.stringify(['entries', source || '', category || '', String(q || '').slice(0, 100), parsedLimit || '', optIn, ready === 'rewrite', compact, summary]);
+  const key = JSON.stringify(['entries', sort, source || '', category || '', String(q || '').slice(0, 100), parsedLimit || '', optIn, ready === 'rewrite', compact, summary]);
   // The shared list is cached for a few seconds; only the viewer's own reaction is added per request.
   const shared = publicApiCache.get(key, () => ({
     entries: fetcher.getEntries({
@@ -3495,6 +3531,7 @@ app.get('/api/entries', (req, res) => {
       category: category || undefined,
       q: q ? String(q).slice(0, 100) : undefined,
       limit: parsedLimit,
+      sort,
       viewer: null,
       compact: compact || summary === 'compact', minimal: compact || summary === 'minimal',
       allowedOptInSourceIds: new Set(optIn),
@@ -3555,7 +3592,7 @@ app.post('/api/entry/:id/view', (req, res) => {
   try {
     store.recordEntryView(entry.id);
     triggerSourceInteractionRefresh(entry.sourceId, 'entry-view');
-    res.json({ stats: store.getEntryStats([entry.id], req.user)[entry.id] });
+    res.json({ stats: store.getEntryStats([entry.id], req.user, { includeHeat: true })[entry.id] });
   } catch (e) {
     sendError(res, e, 'record entry view failed');
   }
@@ -3566,7 +3603,8 @@ app.post('/api/entry/:id/reaction', requireLogin, (req, res) => {
   if (!entry) return res.status(404).json({ error: 'entry not found' });
   try {
     const reaction = String((req.body && req.body.reaction) || '').trim().toLowerCase();
-    const stats = store.setEntryReaction(entry.id, req.user.id, reaction);
+    store.setEntryReaction(entry.id, req.user.id, reaction);
+    const stats = store.getEntryStats([entry.id], req.user, { includeHeat: true })[entry.id];
     if (reaction) {
       notifyTarget(store.getEntrySubmissionOwner(entry.id), req.user, {
         type: `entry_${reaction}`,

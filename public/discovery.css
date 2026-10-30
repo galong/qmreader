@@ -1,0 +1,20 @@
+.reader-empty:has(.public-summary) { overflow: auto; justify-content: center; padding: 48px 24px; }
+.reader-empty:has(.public-summary) .empty-logo { display: none; }
+.public-summary { width: 100%; max-width: 640px; margin: 0 auto; text-align: left; color: var(--text-1); }
+.public-summary h1 { color: var(--text-0); font-size: 24px; line-height: 1.4; }
+.public-summary h2 { font-size: 18px; margin-top: 28px; }
+.public-summary p, .public-summary li { font-size: 14px; line-height: 1.8; }
+.public-summary nav { font-size: 13px; line-height: 2; }
+.public-summary a { color: var(--text-0); text-decoration: underline; text-underline-offset: 3px; }
+.public-summary ul { padding-left: 20px; }
+.public-summary li { margin: 8px 0; }
+.public-excerpt { white-space: pre-wrap; overflow-wrap: anywhere; }
+.list-context-row { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px; border-bottom: 1px solid var(--border); }
+#list-scope-title { flex: 1; min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.list-scope-count { flex: none; color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+#list-context-row #source-refresh-btn { display: inline-flex !important; flex: none; width: 32px; height: 32px; padding: 7px; }
+#list-context-row #source-refresh-btn.hidden { display: none !important; }
+#list-context-row #source-refresh-status:not(.hidden) { display: inline-block !important; position: static; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+#list-context-row:has(#source-refresh-status:not(.hidden)) .list-scope-count { display: none; }
+#list-context-row #source-refresh-btn:focus-visible { outline: 1px solid var(--text-2); outline-offset: 1px; }
+#list-context-row #source-refresh-btn:disabled { opacity: .55; cursor: wait; }
